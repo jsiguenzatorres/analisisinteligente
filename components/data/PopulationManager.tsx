@@ -22,15 +22,15 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
     const { addToast } = useToast();
 
     useEffect(() => {
-        if (authLoading) return; // Esperar a que Auth inicialice
+        if (authLoading) return;
 
-        if (user) {
+        if (user && user.id) {
             fetchPopulations();
         } else {
-            // Si no hay usuario y ya terminó de cargar Auth, terminamos carga local
             setLoading(false);
         }
-    }, [user, authLoading]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.id, authLoading]); // USAMOS user.id (primitivo) PARA EVITAR LOOPS INFINITOS
 
     const fetchPopulations = async () => {
         setLoading(true);

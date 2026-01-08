@@ -33,159 +33,112 @@ const ValidationWorkspace: React.FC<Props> = ({ populationId, onValidationComple
         setError(null);
         setRetryCount(0);
 
-        // 1. Fetch Population Metadata (Timeout Protected)
-        const fetchPopWithTimeout = new Promise<{ data: any, error: any }>(async (resolve) => {
-            const timer = setTimeout(() => {
-                resolve({ data: null, error: { message: 'Timeout' } });
-            }, 5000);
+        // USAMOS PROXY PARA EVITAR BLOQUEO DE FIREWALL
+        let retries = 0;
+        const maxRetries = 10;
+        let success = false;
 
-            const { data, error } = await supabase
-                .from('audit_populations')
-                .select('*')
-                .eq('id', populationId)
-                .single();
+        while (retries < maxRetries && !success) {
+            setRetryCount(retries + 1);
+            try {
+                // Timeout de 10s para el fetch
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-            clearTimeout(timer);
-            resolve({ data, error });
-        });
+                const res = await fetch(`/api/get_validation_data?id=${populationId}`, {
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
 
-        const { data: popData, error: popError } = await fetchPopWithTimeout;
+                if (res.ok) {
+                    const { population: popData, rows: rowData } = await res.json();
 
-        if (popError || !popData) {
-            console.error('Error fetching population:', popError);
-            setError('No se pudo cargar la población para validación.');
-            setLoading(false);
-            return;
+                    if (popData) {
+                        setPopulation(popData);
+
+                        // Si hay filas, procesamos
+                        if (rowData && rowData.length > 0) {
+                            processChartData(popData, rowData);
+                            success = true;
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn("Retrying proxy fetch...", err);
+            }
+
+            if (!success) {
+                retries++;
+                await new Promise(r => setTimeout(r, 2000));
+            }
         }
 
-        const pop = popData as AuditPopulation;
-        setPopulation(pop);
+        if (!success) {
+            setError("No se pudieron recuperar los datos. El firewall corporativo podría estar bloqueando incluso el proxy, o la carga falló.");
+        }
+        setLoading(false);
+    };
 
-        // Determinar si fetch de filas es necesario
+    const processChartData = (pop: AuditPopulation, rows: any[]) => {
         const hasCategory = !!pop.column_mapping?.category;
         const hasDate = !!pop.column_mapping?.date;
         const isAttributeOnly = !pop.total_monetary_value || pop.total_monetary_value === 0;
 
-        if (isAttributeOnly || hasCategory || hasDate) {
-            // UPDATE: Polling Ajustado (60 segundos reales)
-            let retries = 0;
-            let rows: any[] = [];
-            const maxRetries = 12; // 12 * 5s = 60s max wait (approx)
+        const catCounts: Record<string, number> = {};
+        const catSums: Record<string, number> = {};
+        const subCounts: Set<string> = new Set();
+        const dateSums: Record<string, number> = {};
 
-            while (retries < maxRetries) {
-                setRetryCount(retries + 1);
-                // Wrap Supabase call in a timeout promise to prevent infinite hang
-                const fetchWithTimeout = new Promise<{ data: any, error: any }>(async (resolve) => {
-                    // Timeout race
-                    const timer = setTimeout(() => {
-                        resolve({ data: null, error: { message: 'Timeout' } });
-                    }, 5000); // 5 sec per request timeout
+        rows.forEach(row => {
+            const raw = row.raw_json as any;
+            const val = row.monetary_value_col || 0;
 
-                    const { data, error } = await supabase
-                        .from('audit_data_rows')
-                        .select('raw_json, monetary_value_col')
-                        .eq('population_id', populationId);
-
-                    clearTimeout(timer);
-                    resolve({ data, error });
-                });
-
-                const { data: fetchedRows, error: rowError } = await fetchWithTimeout;
-
-                if (rowError && rowError.message !== 'Timeout') {
-                    console.error("Error fetching rows:", rowError);
-                    // Don't break on timeout, just retry. Break on real errors?
-                    // Actually, network errors might be temporary. Let's retry on everything except fatal auth.
-                }
-
-                if (fetchedRows && fetchedRows.length > 0) {
-                    rows = fetchedRows;
-                    break; // Data found!
-                }
-
-                // Wait 1 second before retrying
-                retries++;
-                await new Promise(r => setTimeout(r, 1000));
+            if (pop.column_mapping?.category) {
+                const catName = String(raw[pop.column_mapping.category] || 'Sin Categoría');
+                catCounts[catName] = (catCounts[catName] || 0) + 1;
+                catSums[catName] = (catSums[catName] || 0) + val;
             }
 
-            if (rows.length === 0) {
-                setError("No se encontraron registros procesados aún. La carga puede estar en curso en segundo plano.");
-                setLoading(false);
-                return; // Stop execution, show error with retry option (handled by UI)
+            if (pop.column_mapping?.subcategory) {
+                subCounts.add(String(raw[pop.column_mapping.subcategory] || 'N/A'));
             }
 
-            if (rows.length > 0) {
-                const catField = pop.column_mapping?.category;
-                const subField = pop.column_mapping?.subcategory;
-                const dateField = pop.column_mapping?.date;
-
-                const catCounts: Record<string, number> = {};
-                const catSums: Record<string, number> = {};
-                const subCounts: Set<string> = new Set();
-                const dateSums: Record<string, number> = {}; // YYYY-MM -> Sum
-
-                rows.forEach(row => {
-                    const raw = row.raw_json as any;
-                    const val = row.monetary_value_col || 0;
-
-                    // Categories
-                    if (catField) {
-                        const catName = String(raw[catField] || 'Sin Categoría');
-                        catCounts[catName] = (catCounts[catName] || 0) + 1;
-                        catSums[catName] = (catSums[catName] || 0) + val;
+            if (pop.column_mapping?.date && raw[pop.column_mapping.date]) {
+                try {
+                    const d = new Date(raw[pop.column_mapping.date]);
+                    if (!isNaN(d.getTime())) {
+                        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                        dateSums[key] = (dateSums[key] || 0) + val;
                     }
-
-                    // Subcategories
-                    if (subField) {
-                        subCounts.add(String(raw[subField] || 'N/A'));
-                    }
-
-                    // Dates Logic
-                    if (dateField && raw[dateField]) {
-                        try {
-                            const d = new Date(raw[dateField]);
-                            if (!isNaN(d.getTime())) {
-                                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; // YYYY-MM
-                                dateSums[key] = (dateSums[key] || 0) + val;
-                            }
-                        } catch (e) { }
-                    }
-                });
-
-                // Prepare Main Chart Data
-                let finalData: any[] = [];
-                // Force chart type if mock data
-                if (rows.length === 50) setChartType('monetary_sum_by_cat');
-
-                if (isAttributeOnly) {
-                    setChartType('attribute_freq');
-                    finalData = Object.entries(catCounts)
-                        .map(([name, value]) => ({ name, value }))
-                        .sort((a, b) => b.value - a.value)
-                        .slice(0, 10);
-                } else if (hasCategory) { // Default to monetary
-                    setChartType('monetary_sum_by_cat');
-                    finalData = Object.entries(catSums)
-                        .map(([name, value]) => ({ name, value }))
-                        .sort((a, b) => b.value - a.value)
-                        .slice(0, 10);
-                }
-
-                // Prepare Time Chart Data
-                const timeData = Object.entries(dateSums)
-                    .map(([date, value]) => ({ date, value }))
-                    .sort((a, b) => a.date.localeCompare(b.date)); // Chronological sort
-
-                setChartData(finalData);
-                setTimeChartData(timeData);
-                setUniqueCatCount(Object.keys(catCounts).length);
-                setUniqueSubCatCount(subCounts.size);
+                } catch (e) { }
             }
-        } else {
-            setChartType('basic_stats');
+        });
+
+        let finalData: any[] = [];
+        if (rows.length === 50) setChartType('monetary_sum_by_cat');
+
+        if (isAttributeOnly) {
+            setChartType('attribute_freq');
+            finalData = Object.entries(catCounts)
+                .map(([name, value]) => ({ name, value }))
+                .sort((a, b) => b.value - a.value)
+                .slice(0, 10);
+        } else if (hasCategory) {
+            setChartType('monetary_sum_by_cat');
+            finalData = Object.entries(catSums)
+                .map(([name, value]) => ({ name, value }))
+                .sort((a, b) => b.value - a.value)
+                .slice(0, 10);
         }
 
-        setLoading(false);
+        const timeData = Object.entries(dateSums)
+            .map(([date, value]) => ({ date, value }))
+            .sort((a, b) => a.date.localeCompare(b.date));
+
+        setChartData(finalData);
+        setTimeChartData(timeData);
+        setUniqueCatCount(Object.keys(catCounts).length);
+        setUniqueSubCatCount(subCounts.size);
     };
 
     useEffect(() => {
@@ -195,20 +148,25 @@ const ValidationWorkspace: React.FC<Props> = ({ populationId, onValidationComple
     const handleValidation = async () => {
         if (!population) return;
         setLoading(true);
-        const { data, error } = await supabase
-            .from('audit_populations')
-            .update({ status: 'validado' })
-            .eq('id', population.id)
-            .select()
-            .single();
 
-        if (error) {
-            setError('Falló la actualización del estado de la población.');
-            console.error(error);
-        } else {
+        try {
+            const res = await fetch('/api/validate_population', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: population.id })
+            });
+
+            if (!res.ok) throw new Error('Proxy validation failed');
+
+            const data = await res.json();
             onValidationComplete(data as AuditPopulation);
+
+        } catch (err) {
+            setError('Falló la validación (Proxy Error).');
+            console.error(err);
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     if (loading) {

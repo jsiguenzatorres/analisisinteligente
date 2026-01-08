@@ -188,19 +188,24 @@ const CAVResultsView: React.FC<Props> = ({ appState, setAppState, role, onBack }
             title="Resultados: Variables Clásicas (CAV)"
             subtitle="Estimación de valores totales y calibración de variabilidad"
             onBack={onBack}
-            isSaving={isSaving}
-            saveFeedback={saveFeedback}
             onSaveManual={() => saveToDb(currentResults, false)}
+            isSaving={isSaving}
             sidebarContent={
                 <div className="space-y-6">
                     <div
                         onClick={() => setShowInferenceModal(true)}
                         className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 cursor-pointer group hover:border-orange-500 transition-all relative overflow-hidden"
                     >
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-4">Proyección de Valor (MPU)</span>
+                        <div className="flex items-center gap-2 mb-4">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Inferencia Técnica</span>
+                            <span className="px-2 py-0.5 bg-slate-100 text-[8px] font-black text-slate-500 rounded-md border border-slate-200">DETERMINISTA</span>
+                        </div>
                         <h3 className={`text-4xl font-black mb-2 tracking-tighter ${isAcceptable ? 'text-slate-900' : 'text-rose-600'}`}>
                             ${inference.projectedError.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                         </h3>
+                        <p className="text-[9px] font-medium text-slate-400 mb-4 italic leading-tight">
+                            Análisis basado en Estimación de Diferencia / MPU calibrada con Sigma (σ).
+                        </p>
                         <div className="h-[120px] w-full mt-4">
                             <RiskChart
                                 upperErrorLimit={inference.projectedError}
@@ -209,6 +214,21 @@ const CAVResultsView: React.FC<Props> = ({ appState, setAppState, role, onBack }
                             />
                         </div>
                     </div>
+
+                    {currentResults.pilotMetrics?.type === 'CAV_PILOT' && (currentResults.pilotMetrics as any).requiresRecalibration && (
+                        <div className="bg-rose-50 border border-rose-100 rounded-[2rem] p-6 animate-fade-in-up">
+                            <div className="flex items-center gap-3 mb-4 text-rose-600">
+                                <i className="fas fa-shield-alt text-xl"></i>
+                                <span className="text-[10px] font-black uppercase tracking-widest">Sigma Shield: Bloqueo</span>
+                            </div>
+                            <p className="text-[11px] font-medium text-rose-500 mb-2 leading-relaxed">
+                                Variabilidad excesiva detectada: <strong>{((currentResults.pilotMetrics as any).sigmaDeviation * 100).toFixed(1)}%</strong> de desviación.
+                            </p>
+                            <p className="text-[9px] text-rose-400 italic leading-tight">
+                                La calibración supera el límite del 25%. El sistema ha bloqueado la inferencia final hasta recalibrar Sigma.
+                            </p>
+                        </div>
+                    )}
 
                     {expansionMetrics.recommendedExpansion > 0 && (
                         <div className="bg-rose-50 border border-rose-100 rounded-[2rem] p-6 animate-pulse">
@@ -249,15 +269,6 @@ const CAVResultsView: React.FC<Props> = ({ appState, setAppState, role, onBack }
                             )}
                         </div>
                     </RichInfoCard>
-
-                    <button
-                        onClick={() => saveToDb(currentResults, false)}
-                        disabled={isSaving}
-                        className="w-full py-6 bg-slate-800 text-white rounded-[2rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-lg hover:bg-slate-700 transition-all flex items-center justify-center gap-3"
-                    >
-                        {isSaving ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-save"></i>}
-                        Guardar Trabajo
-                    </button>
                 </div>
             }
         >

@@ -16,6 +16,21 @@ export interface NonStatisticalParams {
     selectedInsight?: InsightType;
     sizeJustification?: string;
     materiality?: number;
+    processCriticality?: 'Bajo' | 'Medio' | 'Alto' | 'Crítico';
+}
+
+export interface StratifiedParams {
+    basis: 'Monetary' | 'Category' | 'Subcategory' | 'MultiVariable';
+    selectedVariables: ('Category' | 'Subcategory')[];
+    strataCount: number;
+    allocationMethod: 'Proporcional' | 'Óptima (Neyman)' | 'Igualitaria' | 'Manual' | 'Proportional' | 'Neyman (Scientific)' | 'Neyman';
+    certaintyStratumThreshold: number;
+    NC: number;
+    ET: number;
+    PE?: number;
+    usePilotSample: boolean;
+    sampleSize?: number;
+    manualAllocations?: Record<string, number>;
 }
 
 
@@ -45,6 +60,11 @@ export interface AuditObservation {
     tipo: 'Control' | 'Sustantivo' | 'Cumplimiento';
     creado_por?: string;
     evidencias?: ObservationEvidence[];
+    review_comments?: {
+        user: string;
+        comment: string;
+        date: string;
+    }[];
 }
 
 export interface ColumnMapping {
@@ -171,6 +191,8 @@ export interface AuditPopulation {
     id: string;
     created_at: string;
     file_name: string;
+    audit_name: string;
+    area: string;
     status: AuditStatus;
     total_rows: number;
     total_monetary_value: number;
@@ -198,6 +220,13 @@ export interface AuditSampleItem {
     raw_row?: any;
 }
 
+export interface StratumMetadata {
+    label: string;
+    populationSize: number;
+    populationValue: number;
+    sampleSize: number;
+}
+
 export interface AuditResults {
     sampleSize: number;
     sample: AuditSampleItem[];
@@ -209,12 +238,13 @@ export interface AuditResults {
     observations?: AuditObservation[];
     sampling_params?: any;
     method?: SamplingMethod;
+    strataMetadata?: StratumMetadata[];
 }
 
 export type PilotMetrics =
     | { type: 'ATTR_PILOT'; phase: 'PILOT_ONLY'; initialSize: number }
     | { type: 'MUS_PILOT'; phase: 'PILOT_ONLY'; initialSize: number; initialEE: number }
-    | { type: 'CAV_PILOT'; phase: 'PILOT_ONLY'; initialSize: number; initialSigma: number; calibratedSigma: number; meanPoblacional: number };
+    | { type: 'CAV_PILOT'; phase: 'PILOT_ONLY'; initialSize: number; initialSigma: number; calibratedSigma: number; meanPoblacional: number; requiresRecalibration?: boolean; sigmaDeviation?: number };
 
 export interface HistoricalSample {
     id: string;
@@ -230,14 +260,20 @@ export interface HistoricalSample {
     is_current: boolean;
 }
 
-export type AuditStatus = 'cargando' | 'pendiente_validacion' | 'validado' | 'archivado';
+export type AuditStatus = 'PENDIENTE' | 'EN PROGRESO' | 'FINALIZADO' | 'ARCHIVADO';
 
 export interface AppState {
     connection: any;
     selectedPopulation: AuditPopulation | null;
     generalParams: any;
     samplingMethod: SamplingMethod;
-    samplingParams: any;
+    samplingParams: {
+        stratified?: StratifiedParams;
+        nonStatistical?: NonStatisticalParams;
+        attribute?: any;
+        mus?: any;
+        cav?: any;
+    };
     results: AuditResults | null;
     isLocked: boolean;
     isCurrentVersion: boolean;
@@ -250,9 +286,9 @@ export interface AuditDataRow {
     [key: string]: any;
     unique_id_col?: string | number;
     monetary_value_col?: number;
-    raw_json?: any;
+    raw_json?: any; // CORREGIDO: raw_data -> raw_json para coincidir con DB
 }
 
-export type UserRole = 'Admin' | 'Auditor' | 'Viewer';
+export type UserRole = 'Admin' | 'Auditor' | 'Supervisor' | 'Viewer';
 
-export type AppView = 'population_manager' | 'data_upload' | 'validation_workspace' | 'discovery_analysis' | 'risk_profiling' | 'dashboard' | 'sampling_config' | 'results';
+export type AppView = 'main_dashboard' | 'population_manager' | 'data_upload' | 'validation_workspace' | 'discovery_analysis' | 'risk_profiling' | 'dashboard' | 'sampling_config' | 'results' | 'audit_expediente' | 'admin_user_management';

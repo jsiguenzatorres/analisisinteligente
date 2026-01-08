@@ -1,7 +1,6 @@
 
 import React, { useState } from 'react';
-import { AppState, SamplingMethod, AuditPopulation, ColumnMapping, AuditResults } from './types';
-import Header from './components/layout/Header';
+import { AppState, SamplingMethod, AuditPopulation, ColumnMapping, AuditResults, AppView } from './types';
 import Step4Results from './components/steps/Step4_Results';
 import Dashboard from './components/dashboard/Dashboard';
 import SamplingWorkspace from './components/sampling/SamplingWorkspace';
@@ -14,10 +13,17 @@ import Stepper from './components/layout/Stepper';
 import { ToastProvider } from './components/ui/ToastContext';
 import { supabase } from './services/supabaseClient';
 
-export type AppView = 'population_manager' | 'data_upload' | 'validation_workspace' | 'discovery_analysis' | 'risk_profiling' | 'dashboard' | 'sampling_config' | 'results';
+import Sidebar from './components/layout/Sidebar';
+import TopHeader from './components/layout/TopHeader';
+import MainDashboard from './components/dashboard/MainDashboard';
+import AuditExpedienteView from './components/results/AuditExpedienteView';
+import { AuthProvider, useAuth } from './services/AuthContext';
+import LoginView from './components/auth/LoginView';
+import AdminUserManagementView from './components/admin/AdminUserManagementView';
 
-const App: React.FC = () => {
-    const [view, setView] = useState<AppView>('population_manager');
+const AuthenticatedApp: React.FC = () => {
+    const { user, profile, loading, signOut } = useAuth();
+    const [view, setView] = useState<AppView>('main_dashboard');
     const [activePopulation, setActivePopulation] = useState<AuditPopulation | null>(null);
     const [validationPopulationId, setValidationPopulationId] = useState<string | null>(null);
 
@@ -38,10 +44,49 @@ const App: React.FC = () => {
         isCurrentVersion: false
     });
 
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-[#F4F7F9]">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="h-12 w-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-slate-500 font-bold animate-pulse text-sm">Validando Credenciales...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (!user) {
+        return <LoginView />;
+    }
+
+    if (profile && !profile.is_active) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-[#F4F7F9] p-8">
+                <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl p-12 text-center animate-fade-in">
+                    <div className="w-24 h-24 bg-amber-50 rounded-3xl flex items-center justify-center mx-auto mb-8 border border-amber-100 shadow-inner">
+                        <i className="fas fa-clock-rotate-left text-4xl text-amber-500"></i>
+                    </div>
+                    <h2 className="text-2xl font-black text-slate-800 mb-4">Acceso en Revisión</h2>
+                    <p className="text-slate-500 font-medium leading-relaxed mb-8">
+                        Hola <span className="text-slate-800 font-bold">{profile.full_name}</span>. Tu cuenta ha sido registrada correctamente, pero aún no está activa.
+                    </p>
+                    <div className="bg-slate-50 rounded-2xl p-6 text-xs text-slate-400 font-bold uppercase tracking-widest border border-slate-100 italic">
+                        Un administrador validará tus credenciales y autorizará tu acceso en breve.
+                    </div>
+                    <button
+                        onClick={() => signOut()}
+                        className="mt-10 text-[10px] font-black text-blue-600 uppercase tracking-widest hover:text-indigo-700 transition-colors"
+                    >
+                        Salir / Iniciar con otra cuenta
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     const handlePopulationSelected = async (population: AuditPopulation) => {
         try {
             console.log("🔍 Cargando población:", population.id);
-            // Cargar resultados guardados previamente para esta población
             const { data: existingResults, error: fetchError } = await supabase
                 .from('audit_results')
                 .select('results_json')
@@ -53,9 +98,6 @@ const App: React.FC = () => {
             }
 
             const rawJson = existingResults?.results_json as any;
-
-            // LÓGICA DE DETECCIÓN MULTI-MÉTODO:
-            // Si el objeto tiene una propiedad que coincide con un método, es Multi-Método.
             const isMultiMethod = rawJson && (rawJson[SamplingMethod.MUS] || rawJson[SamplingMethod.Attribute] || rawJson[SamplingMethod.NonStatistical]);
 
             let loadedResults: AuditResults | null = null;
@@ -63,12 +105,10 @@ const App: React.FC = () => {
             let activeMethod: SamplingMethod = appState.samplingMethod;
 
             if (isMultiMethod) {
-                // Si es multi-método, restauramos el último usado
                 activeMethod = rawJson.last_method as SamplingMethod || activeMethod;
                 loadedResults = rawJson[activeMethod] || null;
                 loadedParams = loadedResults?.sampling_params || null;
             } else if (rawJson) {
-                // Datos Legacy (un solo objeto en la raíz)
                 loadedResults = rawJson;
                 loadedParams = rawJson.sampling_params || null;
                 activeMethod = rawJson.method || activeMethod;
@@ -99,20 +139,19 @@ const App: React.FC = () => {
     };
 
     const handleUploadComplete = (populationId: string) => {
+        console.log("🚩 Carga completa. Cambiando a ValidationWorkspace para:", populationId);
         setValidationPopulationId(populationId);
         setView('validation_workspace');
     };
 
     const handleValidationComplete = (population: AuditPopulation) => {
         setValidationPopulationId(population.id);
-        // After validation, proceed to Discovery Analysis
         setView('discovery_analysis');
     };
 
     const handleDiscoveryComplete = async (mapping: ColumnMapping, activeTests: string[]) => {
         if (!validationPopulationId) return;
 
-        // Save Discovery results (Mapping & Active Tests) to DB
         const { data, error } = await supabase
             .from('audit_populations')
             .update({
@@ -128,7 +167,6 @@ const App: React.FC = () => {
             return;
         }
 
-        // Proceed to Risk Profiling with updated population data
         setActivePopulation(data as AuditPopulation);
         setView('risk_profiling');
     };
@@ -141,8 +179,6 @@ const App: React.FC = () => {
     const handleMethodSelect = (method: SamplingMethod) => {
         setAppState(prev => {
             const storage = prev.full_results_storage || {};
-
-            // Buscamos si hay resultados específicos para este método
             const methodSpecificResults = storage[method];
             const isLegacyMatch = prev.results && (prev.results as any).method === method;
             const existingWork = methodSpecificResults || (isLegacyMatch ? prev.results : null);
@@ -163,15 +199,30 @@ const App: React.FC = () => {
     };
 
     const navigateTo = (targetView: AppView) => {
-        if (targetView === 'population_manager') {
+        if (targetView === 'population_manager' || targetView === 'main_dashboard') {
             setAppState(prev => ({ ...prev, selectedPopulation: null, results: null, isLocked: false, isCurrentVersion: false }));
             setActivePopulation(null);
         }
         setView(targetView);
     };
 
+    const handleLoadProject = async (id: string) => {
+        const { data, error } = await supabase
+            .from('audit_populations')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (data && !error) {
+            handlePopulationSelected(data as AuditPopulation);
+        }
+    };
+
     const renderView = () => {
+        const displayUserName = profile?.full_name || user?.email?.split('@')[0] || "Auditor";
         switch (view) {
+            case 'main_dashboard':
+                return <MainDashboard userName={displayUserName} onNavigate={navigateTo} onLoadPopulation={handleLoadProject} />;
             case 'population_manager':
                 return <PopulationManager onPopulationSelected={handlePopulationSelected} onAddNew={() => setView('data_upload')} />;
             case 'data_upload':
@@ -215,24 +266,43 @@ const App: React.FC = () => {
                     onBack={() => setView('sampling_config')}
                     onRestart={() => navigateTo('population_manager')}
                 />;
+            case 'audit_expediente':
+                return <AuditExpedienteView appState={appState} onBack={() => setView('main_dashboard')} />;
+            case 'admin_user_management':
+                return <AdminUserManagementView />;
             default:
-                return <PopulationManager onPopulationSelected={handlePopulationSelected} onAddNew={() => setView('data_upload')} />;
+                return <MainDashboard userName={displayUserName} onNavigate={navigateTo} />;
         }
     };
 
     return (
-        <ToastProvider>
-            <div className="flex flex-col h-screen bg-gray-50 font-sans text-gray-800">
-                <Header onNavigate={navigateTo} />
-                <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100 p-4 md:p-8">
-                    {!['population_manager'].includes(view) && (
-                        <div className="mb-12">
-                            <Stepper currentView={view} appState={appState} />
-                        </div>
-                    )}
-                    {renderView()}
+        <div className="flex h-screen bg-[#F4F7F9] font-sans text-slate-800 overflow-hidden">
+            {/* BARRA LATERAL FIJA */}
+            <Sidebar currentView={view} onNavigate={navigateTo} appState={appState} />
+
+            {/* CONTENIDO PRINCIPAL */}
+            <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+                <TopHeader
+                    onNavigate={navigateTo}
+                />
+
+                <main className="flex-1 overflow-x-hidden overflow-y-auto bg-[#F4F7F9] p-0 relative">
+
+                    <div className="container mx-auto">
+                        {renderView()}
+                    </div>
                 </main>
             </div>
+        </div>
+    );
+};
+
+const App: React.FC = () => {
+    return (
+        <ToastProvider>
+            <AuthProvider>
+                <AuthenticatedApp />
+            </AuthProvider>
         </ToastProvider>
     );
 };

@@ -225,19 +225,24 @@ const StratifiedResultsView: React.FC<Props> = ({ appState, setAppState, role, o
             title="Resultados: Muestreo Estratificado"
             subtitle="Análisis de cumplimiento segmentado por estratos"
             onBack={onBack}
-            isSaving={isSaving}
-            saveFeedback={saveFeedback}
             onSaveManual={() => saveToDb(currentResults, false)}
+            isSaving={isSaving}
             sidebarContent={
                 <div className="space-y-6">
                     <div
                         onClick={() => setShowInferenceModal(true)}
                         className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 cursor-pointer group hover:border-indigo-500 transition-all relative overflow-hidden"
                     >
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-4">Proyección de Riesgo</span>
+                        <div className="flex items-center gap-2 mb-4">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Inferencia Técnica</span>
+                            <span className="px-2 py-0.5 bg-slate-100 text-[8px] font-black text-slate-500 rounded-md border border-slate-200">DETERMINISTA</span>
+                        </div>
                         <h3 className={`text-4xl font-black mb-2 tracking-tighter ${isAcceptable ? 'text-slate-900' : 'text-rose-600'}`}>
                             ${inference.projectedError.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                         </h3>
+                        <p className="text-[9px] font-medium text-slate-400 mb-4 italic leading-tight">
+                            Basado en NIA 530: Proyección Ponderada por Estrato [Sum(Error_h * (N_h/n_h))].
+                        </p>
                         <div className="h-[120px] w-full mt-4">
                             <RiskChart
                                 upperErrorLimit={inference.projectedError}
@@ -312,15 +317,6 @@ const StratifiedResultsView: React.FC<Props> = ({ appState, setAppState, role, o
                             </div>
                         </div>
                     </RichInfoCard>
-
-                    <button
-                        onClick={() => saveToDb(currentResults, false)}
-                        disabled={isSaving}
-                        className="w-full py-6 bg-slate-800 text-white rounded-[2rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-lg hover:bg-slate-700 transition-all flex items-center justify-center gap-3"
-                    >
-                        {isSaving ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-save"></i>}
-                        Guardar Trabajo
-                    </button>
                 </div>
             }
         >
@@ -525,7 +521,7 @@ const StratifiedResultsView: React.FC<Props> = ({ appState, setAppState, role, o
 
                             <RichInfoCard type="methodology" title="Nota Metodológica">
                                 <p className="text-[11px] text-slate-600 leading-relaxed">
-                                    La inferencia se realiza mediante <strong>Estimación de Razón</strong>, calculando la tasa de error encontrada en cada estrato y extrapolándola proporcionalmente al valor total de dicho segmento.
+                                    La inferencia se realiza mediante <strong>Proyección Ponderada (SIT)</strong> conforme a la NIA 530. El sistema calcula el error proyectado para cada estrato de forma independiente (proyectando el error del sample al universo del estrato) y consolida la suma total. Esto evita sesgos si un estrato tiene mayor representatividad monetaria que otro.
                                 </p>
                             </RichInfoCard>
                         </div>

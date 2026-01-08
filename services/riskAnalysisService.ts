@@ -47,8 +47,7 @@ export const performRiskProfiling = (rows: any[], pop: AuditPopulation): { updat
             const prob = catFreq[String(raw[category])] / total;
             if (prob < 0.03) {
                 score += 25;
-                // Add test ID to factor for later scoring identification
-                factors.push("Entropía (entropy): Segmento altamente inusual");
+                factors.push(`Frecuencia Baja (${(prob * 100).toFixed(2)}%): El segmento [${raw[category]}] es estadísticamente inusual en esta población.`);
             }
         }
 
@@ -58,10 +57,10 @@ export const performRiskProfiling = (rows: any[], pop: AuditPopulation): { updat
             const dt = new Date(raw[timestamp]);
             const hour = dt.getHours();
             const day = dt.getDay(); // 0: Domingo, 6: Sábado
-            if (day === 0 || day === 6 || hour < 7 || hour > 19) {
+            const isWeekend = day === 0 || day === 6;
+            if (isWeekend || hour < 7 || hour > 19) {
                 score += 20;
-                // Add test ID to factor for later scoring identification
-                factors.push("Horario No Laboral / Fin de Semana (timestamps)");
+                factors.push(`Fuera de Horario (${hour}h, ${isWeekend ? 'Fin de semana' : 'Día laboral'}): Registro creado en ventana de tiempo no estándar.`);
             }
         }
 
@@ -69,10 +68,11 @@ export const performRiskProfiling = (rows: any[], pop: AuditPopulation): { updat
         // --- PRUEBA 3: FRACCIONAMIENTO (Splitting) ---
         if (activeTests.includes('splitting') && vendor && monetaryValue) {
             // Un monto "justo debajo" de un número redondo (ej: 990, 4950)
-            if (m > 0 && (m % 1000 >= 980 || m % 5000 >= 4900)) {
+            const rem1000 = m % 1000;
+            const rem5000 = m % 5000;
+            if (m > 0 && (rem1000 >= 980 || rem5000 >= 4900)) {
                 score += 30;
-                // Add test ID to factor for later scoring identification
-                factors.push("Posible evasión de umbral - Fraccionamiento (splitting)");
+                factors.push(`Proximidad de Umbral ($${m.toLocaleString()}): Monto crítico detectado cerca de límite de redondeo.`);
             }
         }
 
@@ -83,8 +83,7 @@ export const performRiskProfiling = (rows: any[], pop: AuditPopulation): { updat
             const avg = uData.sum / uData.count;
             if (m > avg * 3 && uData.count > 5) {
                 score += 35;
-                // Add test ID to factor for later scoring identification
-                factors.push("Anomalía de comportamiento: Monto excede promedio de usuario (actors)");
+                factors.push(`Desviación de Actor ($${m.toLocaleString()} vs Promedio $${avg.toLocaleString()}): Monto excede 3x el histórico del usuario.`);
             }
         }
 

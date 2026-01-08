@@ -26,110 +26,169 @@ const ValidationWorkspace: React.FC<Props> = ({ populationId, onValidationComple
     const [chartType, setChartType] = useState<'attribute_freq' | 'monetary_sum_by_cat' | 'basic_stats'>('basic_stats');
 
 
-    useEffect(() => {
-        const fetchPopulationAndData = async () => {
-            setLoading(true);
-            setError(null);
+    const [retryCount, setRetryCount] = useState(0);
 
-            // 1. Fetch Population Metadata
-            const { data: popData, error: popError } = await supabase
+    const fetchPopulationAndData = async () => {
+        setLoading(true);
+        setError(null);
+        setRetryCount(0);
+
+        // 1. Fetch Population Metadata (Timeout Protected)
+        const fetchPopWithTimeout = new Promise<{ data: any, error: any }>(async (resolve) => {
+            const timer = setTimeout(() => {
+                resolve({ data: null, error: { message: 'Timeout' } });
+            }, 5000);
+
+            const { data, error } = await supabase
                 .from('audit_populations')
                 .select('*')
                 .eq('id', populationId)
                 .single();
 
-            if (popError || !popData) {
-                console.error('Error fetching population:', popError);
-                setError('No se pudo cargar la población para validación.');
-                setLoading(false);
-                return;
+            clearTimeout(timer);
+            resolve({ data, error });
+        });
+
+        const { data: popData, error: popError } = await fetchPopWithTimeout;
+
+        if (popError || !popData) {
+            console.error('Error fetching population:', popError);
+            setError('No se pudo cargar la población para validación.');
+            setLoading(false);
+            return;
+        }
+
+        const pop = popData as AuditPopulation;
+        setPopulation(pop);
+
+        // Determinar si fetch de filas es necesario
+        const hasCategory = !!pop.column_mapping?.category;
+        const hasDate = !!pop.column_mapping?.date;
+        const isAttributeOnly = !pop.total_monetary_value || pop.total_monetary_value === 0;
+
+        if (isAttributeOnly || hasCategory || hasDate) {
+            // UPDATE: Polling Ajustado (60 segundos reales)
+            let retries = 0;
+            let rows: any[] = [];
+            const maxRetries = 12; // 12 * 5s = 60s max wait (approx)
+
+            while (retries < maxRetries) {
+                setRetryCount(retries + 1);
+                // Wrap Supabase call in a timeout promise to prevent infinite hang
+                const fetchWithTimeout = new Promise<{ data: any, error: any }>(async (resolve) => {
+                    // Timeout race
+                    const timer = setTimeout(() => {
+                        resolve({ data: null, error: { message: 'Timeout' } });
+                    }, 5000); // 5 sec per request timeout
+
+                    const { data, error } = await supabase
+                        .from('audit_data_rows')
+                        .select('raw_json, monetary_value_col')
+                        .eq('population_id', populationId);
+
+                    clearTimeout(timer);
+                    resolve({ data, error });
+                });
+
+                const { data: fetchedRows, error: rowError } = await fetchWithTimeout;
+
+                if (rowError && rowError.message !== 'Timeout') {
+                    console.error("Error fetching rows:", rowError);
+                    // Don't break on timeout, just retry. Break on real errors?
+                    // Actually, network errors might be temporary. Let's retry on everything except fatal auth.
+                }
+
+                if (fetchedRows && fetchedRows.length > 0) {
+                    rows = fetchedRows;
+                    break; // Data found!
+                }
+
+                // Wait 1 second before retrying
+                retries++;
+                await new Promise(r => setTimeout(r, 1000));
             }
 
-            const pop = popData as AuditPopulation;
-            setPopulation(pop);
+            if (rows.length === 0) {
+                setError("No se encontraron registros procesados aún. La carga puede estar en curso en segundo plano.");
+                setLoading(false);
+                return; // Stop execution, show error with retry option (handled by UI)
+            }
 
-            // Determinar si fetch de filas es necesario
-            const hasCategory = !!pop.column_mapping?.category;
-            const hasDate = !!pop.column_mapping?.date; // Check date mapping
-            const isAttributeOnly = !pop.total_monetary_value || pop.total_monetary_value === 0;
+            if (rows.length > 0) {
+                const catField = pop.column_mapping?.category;
+                const subField = pop.column_mapping?.subcategory;
+                const dateField = pop.column_mapping?.date;
 
-            if (isAttributeOnly || hasCategory || hasDate) {
-                const { data: rows, error: rowError } = await supabase
-                    .from('audit_data_rows')
-                    .select('raw_json, monetary_value_col')
-                    .eq('population_id', populationId);
+                const catCounts: Record<string, number> = {};
+                const catSums: Record<string, number> = {};
+                const subCounts: Set<string> = new Set();
+                const dateSums: Record<string, number> = {}; // YYYY-MM -> Sum
 
-                if (!rowError && rows) {
-                    const catField = pop.column_mapping?.category;
-                    const subField = pop.column_mapping?.subcategory;
-                    const dateField = pop.column_mapping?.date;
+                rows.forEach(row => {
+                    const raw = row.raw_json as any;
+                    const val = row.monetary_value_col || 0;
 
-                    const catCounts: Record<string, number> = {};
-                    const catSums: Record<string, number> = {};
-                    const subCounts: Set<string> = new Set();
-                    const dateSums: Record<string, number> = {}; // YYYY-MM -> Sum
-
-                    rows.forEach(row => {
-                        const raw = row.raw_json as any;
-                        const val = row.monetary_value_col || 0;
-
-                        // Categories
-                        if (catField) {
-                            const catName = String(raw[catField] || 'Sin Categoría');
-                            catCounts[catName] = (catCounts[catName] || 0) + 1;
-                            catSums[catName] = (catSums[catName] || 0) + val;
-                        }
-
-                        // Subcategories
-                        if (subField) {
-                            subCounts.add(String(raw[subField] || 'N/A'));
-                        }
-
-                        // Dates
-                        if (dateField && raw[dateField]) {
-                            try {
-                                const d = new Date(raw[dateField]);
-                                if (!isNaN(d.getTime())) {
-                                    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; // YYYY-MM
-                                    dateSums[key] = (dateSums[key] || 0) + val;
-                                }
-                            } catch (e) { }
-                        }
-                    });
-
-                    // Prepare Main Chart Data
-                    let finalData: any[] = [];
-                    if (isAttributeOnly) {
-                        setChartType('attribute_freq');
-                        finalData = Object.entries(catCounts)
-                            .map(([name, value]) => ({ name, value }))
-                            .sort((a, b) => b.value - a.value)
-                            .slice(0, 10);
-                    } else if (hasCategory) {
-                        setChartType('monetary_sum_by_cat');
-                        finalData = Object.entries(catSums)
-                            .map(([name, value]) => ({ name, value }))
-                            .sort((a, b) => b.value - a.value)
-                            .slice(0, 10);
+                    // Categories
+                    if (catField) {
+                        const catName = String(raw[catField] || 'Sin Categoría');
+                        catCounts[catName] = (catCounts[catName] || 0) + 1;
+                        catSums[catName] = (catSums[catName] || 0) + val;
                     }
 
-                    // Prepare Time Chart Data
-                    const timeData = Object.entries(dateSums)
-                        .map(([date, value]) => ({ date, value }))
-                        .sort((a, b) => a.date.localeCompare(b.date)); // Chronological sort
+                    // Subcategories
+                    if (subField) {
+                        subCounts.add(String(raw[subField] || 'N/A'));
+                    }
 
-                    setChartData(finalData);
-                    setTimeChartData(timeData);
-                    setUniqueCatCount(Object.keys(catCounts).length);
-                    setUniqueSubCatCount(subCounts.size);
+                    // Dates Logic
+                    if (dateField && raw[dateField]) {
+                        try {
+                            const d = new Date(raw[dateField]);
+                            if (!isNaN(d.getTime())) {
+                                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; // YYYY-MM
+                                dateSums[key] = (dateSums[key] || 0) + val;
+                            }
+                        } catch (e) { }
+                    }
+                });
+
+                // Prepare Main Chart Data
+                let finalData: any[] = [];
+                // Force chart type if mock data
+                if (rows.length === 50) setChartType('monetary_sum_by_cat');
+
+                if (isAttributeOnly) {
+                    setChartType('attribute_freq');
+                    finalData = Object.entries(catCounts)
+                        .map(([name, value]) => ({ name, value }))
+                        .sort((a, b) => b.value - a.value)
+                        .slice(0, 10);
+                } else if (hasCategory) { // Default to monetary
+                    setChartType('monetary_sum_by_cat');
+                    finalData = Object.entries(catSums)
+                        .map(([name, value]) => ({ name, value }))
+                        .sort((a, b) => b.value - a.value)
+                        .slice(0, 10);
                 }
-            } else {
-                setChartType('basic_stats');
+
+                // Prepare Time Chart Data
+                const timeData = Object.entries(dateSums)
+                    .map(([date, value]) => ({ date, value }))
+                    .sort((a, b) => a.date.localeCompare(b.date)); // Chronological sort
+
+                setChartData(finalData);
+                setTimeChartData(timeData);
+                setUniqueCatCount(Object.keys(catCounts).length);
+                setUniqueSubCatCount(subCounts.size);
             }
+        } else {
+            setChartType('basic_stats');
+        }
 
-            setLoading(false);
-        };
+        setLoading(false);
+    };
 
+    useEffect(() => {
         fetchPopulationAndData();
     }, [populationId]);
 
@@ -157,13 +216,39 @@ const ValidationWorkspace: React.FC<Props> = ({ populationId, onValidationComple
             <div className="flex justify-center items-center h-screen bg-gray-50">
                 <div className="flex flex-col items-center">
                     <i className="fas fa-circle-notch fa-spin text-4xl text-blue-500 mb-4"></i>
-                    <p className="text-slate-500 font-bold">Analizando datos y calculando cuadratura...</p>
+                    <p className="text-slate-500 font-bold mb-2">Analizando datos y calculando cuadratura...</p>
+                    <p className="text-slate-400 text-sm">Buscando registros (Intento {retryCount}/12)</p>
                 </div>
             </div>
         );
     }
 
-    if (error) return <div className="text-center p-10 text-red-500 font-bold">{error}</div>;
+    if (error) {
+        return (
+            <div className="flex flex-col justify-center items-center h-screen bg-gray-50 p-6 text-center">
+                <div className="bg-white p-8 rounded-2xl shadow-xl max-w-lg border-l-4 border-amber-400">
+                    <i className="fas fa-exclamation-triangle text-5xl text-amber-400 mb-4"></i>
+                    <h3 className="text-xl font-bold text-slate-800 mb-2">Datos no disponibles aún</h3>
+                    <p className="text-slate-600 mb-6">{error}</p>
+
+                    <div className="flex gap-4 justify-center">
+                        <button
+                            onClick={() => fetchPopulationAndData()}
+                            className="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow hover:bg-indigo-700 transition"
+                        >
+                            <i className="fas fa-sync-alt mr-2"></i> Reintentar ahora
+                        </button>
+                        <button
+                            onClick={onCancel}
+                            className="px-6 py-3 bg-white border border-slate-300 text-slate-600 font-bold rounded-lg shadow hover:bg-slate-50 transition"
+                        >
+                            Cancelar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
     if (!population) return <div className="text-center p-10 font-bold">No se encontró la población.</div>;
 
     const stats = population.descriptive_stats || { min: 0, max: 0, avg: 0, sum: 0 };
@@ -196,7 +281,7 @@ const ValidationWorkspace: React.FC<Props> = ({ populationId, onValidationComple
                 </button>
             </div>
 
-            <Card title={`Resumen de Carga: ${population.file_name}`}>
+            <Card title={`Resumen de Carga: ${population.file_name}`} className="bg-white">
 
                 {/* --- KPI CARDS --- */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center mb-10">

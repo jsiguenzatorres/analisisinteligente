@@ -45,6 +45,24 @@
 <body class="bg-gray-100">
   <div id="root"></div>
   <script type="module" src="/index.tsx"></script>
+  <script>
+    console.log("⚠️ VERIFICACIÓN DE CÓDIGO: vFINAL CARGADA");
+    window.onload = function() {
+      // Pequeño retardo para asegurar que React montó
+      setTimeout(() => {
+        const banner = document.createElement('div');
+        banner.innerHTML = "✅ CÓDIGO NUEVO CARGADO CORRECTAMENTE";
+        banner.style.position = 'fixed';
+        banner.style.bottom = '0';
+        banner.style.right = '0';
+        banner.style.backgroundColor = '#10b981';
+        banner.style.color = 'white';
+        banner.style.padding = '10px';
+        banner.style.zIndex = '9999';
+        document.body.appendChild(banner);
+      }, 2000);
+    }
+  </script>
 </body>
 
 </html>

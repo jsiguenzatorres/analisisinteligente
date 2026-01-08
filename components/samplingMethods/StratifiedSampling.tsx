@@ -107,6 +107,66 @@ const StratifiedSampling: React.FC<Props> = ({ appState, setAppState }) => {
                 </div>
             </div>
 
+            {/* Panel Proyectivo Technical Alignment */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-[#0f172a] p-8 rounded-3xl text-white border border-slate-800 relative overflow-hidden group">
+                    <div className="absolute -right-10 -top-10 w-40 h-40 bg-indigo-500/10 rounded-full blur-3xl group-hover:bg-indigo-500/20 transition-all"></div>
+                    <div className="relative z-10">
+                        <div className="flex justify-between items-center mb-6">
+                            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400">Modelo Proyectivo NIA 530</h4>
+                            <span className="px-2 py-0.5 bg-indigo-500/20 text-[8px] font-black rounded border border-indigo-500/30">DETERMINISTA</span>
+                        </div>
+
+                        <div className="space-y-6">
+                            <div>
+                                <span className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Fórmula de Tamaño base (n)</span>
+                                <code className="text-xs text-indigo-200 font-mono">n = (Z² × σ²) / e²</code>
+                            </div>
+
+                            <div>
+                                <span className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Ajuste Población Finita (FPCF)</span>
+                                <code className="text-xs text-indigo-200 font-mono">n' = n / (1 + n/N)</code>
+                            </div>
+
+                            <div className="pt-4 border-t border-slate-800">
+                                <div className="flex justify-between items-end">
+                                    <div>
+                                        <span className="text-[9px] font-black text-slate-500 uppercase block">Proyección Sugerida</span>
+                                        <p className="text-3xl font-black text-white">
+                                            {Math.ceil(Math.pow(((appState.selectedPopulation?.total_rows || 1000) * (params.NC >= 95 ? 1.96 : 1.645) * (appState.selectedPopulation?.descriptive_stats?.std_dev || 1000)) / (Math.max(1, (params.ET / 100) * (appState.selectedPopulation?.total_monetary_value || 1000000))), 2))}
+                                            <span className="text-xs font-medium text-slate-500 ml-2">unidades</span>
+                                        </p>
+                                    </div>
+                                    <div className="text-right">
+                                        <span className="text-[9px] font-black text-slate-500 uppercase block">Confianza</span>
+                                        <p className="text-lg font-black text-indigo-400">{params.NC}%</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm flex flex-col justify-between">
+                    <div>
+                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-6">Lógica de Distribución</h4>
+                        <div className="space-y-4">
+                            <div className={`p-4 rounded-2xl border ${params.allocationMethod === 'Óptima (Neyman)' ? 'bg-purple-50 border-purple-100' : 'bg-slate-50 border-slate-100'}`}>
+                                <p className="text-[10px] font-black text-slate-800 uppercase mb-1">Neyman Allocation</p>
+                                <p className="text-[11px] text-slate-500 leading-relaxed font-medium">Asigna más ítems a los estratos con mayor varianza ($\sigma_h$), optimizando la precisión para fraudes de alto valor.</p>
+                            </div>
+                            <div className={`p-4 rounded-2xl border ${params.allocationMethod === 'Proporcional' ? 'bg-indigo-50 border-indigo-100' : 'bg-slate-50 border-slate-100'}`}>
+                                <p className="text-[10px] font-black text-slate-800 uppercase mb-1">Proportional Distribution</p>
+                                <p className="text-[11px] text-slate-500 leading-relaxed font-medium">Distribución equitativa basada en el peso poblacional ($N_h$). Ideal para auditorías de cumplimiento general.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <p className="text-[9px] text-slate-400 italic mt-4 text-center">
+                        <i className="fas fa-shield-alt mr-2"></i> Implementación estricta de NIA-ES 530 para mitigar alucinaciones estadísticas.
+                    </p>
+                </div>
+            </div>
+
             <div className="bg-white p-6 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100">
                 <label className="block text-sm font-bold text-slate-800 mb-6 uppercase tracking-[0.15em] text-center">Base de Estratificación Seleccionada</label>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

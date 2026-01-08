@@ -173,10 +173,18 @@ const MonetaryResultsView: React.FC<Props> = ({ appState, setAppState, role, onB
                 <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-100">
                     <i className="fas fa-chart-line text-indigo-500 text-xs"></i>
                 </div>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-4">Error Proyectado</span>
-                <h3 className={`text-4xl font-black mb-2 tracking-tighter ${isAcceptable ? 'text-slate-900' : 'text-rose-600'}`}>
+                <div className="flex items-center gap-2 mb-4">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Inferencia Técnica</span>
+                    <span className="px-2 py-0.5 bg-slate-100 text-[8px] font-black text-slate-500 rounded-md border border-slate-200">DETERMINISTA</span>
+                </div>
+                <h3 className={`text-4xl font-black mb-1 tracking-tighter ${isAcceptable ? 'text-slate-900' : 'text-rose-600'}`}>
                     ${inference.projectedError.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </h3>
+                <p className="text-[9px] font-medium text-slate-400 mb-4 italic">
+                    {isAcceptable
+                        ? `Error Proyectado ($${inference.projectedError.toLocaleString()}) ≤ Tolerable ($${tolerableError.toLocaleString()}).`
+                        : `Error Proyectado ($${inference.projectedError.toLocaleString()}) > Tolerable ($${tolerableError.toLocaleString()}).`}
+                </p>
                 <div className="h-[140px] w-full mt-6 bg-slate-50/50 rounded-3xl p-4 border border-slate-50">
                     <RiskChart
                         upperErrorLimit={inference.projectedError}
@@ -232,14 +240,7 @@ const MonetaryResultsView: React.FC<Props> = ({ appState, setAppState, role, onB
                 <p className="text-[9px] font-bold text-cyan-400 mt-4 uppercase tracking-[0.2em] opacity-0 group-hover:opacity-100 transition-all">Ver Detalles <i className="fas fa-arrow-right ml-1"></i></p>
             </div>
 
-            <button
-                onClick={() => saveToDb(currentResults, false)}
-                disabled={isSaving}
-                className="w-full py-6 bg-slate-800 text-white rounded-[2rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-lg hover:bg-slate-700 transition-all flex items-center justify-center gap-3"
-            >
-                {isSaving ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-save"></i>}
-                Guardar Trabajo
-            </button>
+            <p className="text-[9px] font-black text-slate-300 uppercase text-center tracking-[0.2em] mt-6 italic">Ver Análisis de Inferencia</p>
         </div>
     );
 
@@ -285,11 +286,11 @@ const MonetaryResultsView: React.FC<Props> = ({ appState, setAppState, role, onB
                     <div className="text-[9px] text-slate-400 font-medium">Seguridad Audit.</div>
                 </div>
 
-                <div onClick={() => setHelpKey("Intervalo")} className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm cursor-help hover:shadow-md transition-all group relative overflow-hidden">
+                <div onClick={() => setHelpKey("mus_intervalo")} className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm cursor-help hover:shadow-md transition-all group relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-2 opacity-100 transition-transform group-hover:scale-110"><i className="fas fa-question-circle text-indigo-500 shadow-sm rounded-full"></i></div>
-                    <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Intervalo (J)</div>
+                    <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Intervalo (IM)</div>
                     <div className="text-xl font-black tracking-tighter text-slate-800">
-                        ${(musParams.TE / (musParams.RIA <= 5 ? 3.0 : 2.31)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        ${(totalValue / currentResults.sampleSize).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                     </div>
                     <div className="text-[9px] text-slate-400 font-medium">Salto Monetario</div>
                 </div>
@@ -364,16 +365,29 @@ const MonetaryResultsView: React.FC<Props> = ({ appState, setAppState, role, onB
                                 return (
                                     <tr key={idx} className={`transition-colors ${isEx ? 'bg-rose-50/30' : riskScore > 70 ? 'bg-amber-50/20' : 'hover:bg-slate-50'}`}>
                                         <td className="px-10 py-6 text-[11px] font-black text-slate-300 text-center">{idx + 1}</td>
-                                        <td className="px-10 py-6 font-black text-[12px] text-slate-800">{item.id}</td>
+                                        <td className="px-10 py-6 font-black text-[12px] text-slate-800 group relative">
+                                            {item.id}
+                                            {item.risk_factors && item.risk_factors.length > 0 && (
+                                                <div className="absolute left-0 top-full mt-1 hidden group-hover:block z-50 bg-slate-900 text-white p-3 rounded-xl shadow-2xl min-w-[200px] border border-slate-700">
+                                                    <p className="text-[8px] font-black text-slate-500 uppercase mb-2 border-b border-slate-800 pb-1">Evidencia Técnica (Determinista)</p>
+                                                    {item.risk_factors.map((f, fi) => (
+                                                        <div key={fi} className="text-[9px] mb-1 flex items-start gap-2">
+                                                            <i className="fas fa-cog text-cyan-400 mt-1"></i>
+                                                            <span>{f}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </td>
                                         <td className="px-10 py-6">
                                             {isPilotItem ?
                                                 <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-wider">Piloto</span>
                                                 : isExpansionItem ?
                                                     <span className="px-3 py-1 bg-amber-50 text-amber-600 rounded-full text-[9px] font-black uppercase tracking-wider">Ampliación</span>
-                                                    : item.risk_flag === 'TOP_STRATUM' ?
-                                                        <span className="px-3 py-1 bg-purple-50 text-purple-600 rounded-full text-[9px] font-black uppercase tracking-wider">Certeza</span>
-                                                        : item.risk_flag === 'NEGATIVO_SEGREGADO' || item.risk_flag === 'NEGATIVO_ABS' ?
-                                                            <span className="px-3 py-1 bg-rose-50 text-rose-600 rounded-full text-[9px] font-black uppercase tracking-wider font-bold">Acreedor</span>
+                                                    : item.risk_flag === 'PARTIDA_CLAVE' ?
+                                                        <span className="px-3 py-1 bg-rose-600 text-white rounded-full text-[9px] font-black uppercase tracking-wider shadow-sm ring-2 ring-rose-100">Clave</span>
+                                                        : item.risk_flag === 'TOP_STRATUM' ?
+                                                            <span className="px-3 py-1 bg-purple-50 text-purple-600 rounded-full text-[9px] font-black uppercase tracking-wider">Certeza</span>
                                                             : <span className="px-3 py-1 bg-slate-100 text-slate-400 rounded-full text-[9px] font-black uppercase tracking-wider">Muestra</span>
                                             }
                                         </td>
@@ -433,6 +447,8 @@ const MonetaryResultsView: React.FC<Props> = ({ appState, setAppState, role, onB
         <>
             <SharedResultsLayout
                 appState={appState} role={role} onBack={onBack} title="Resultados: Muestreo Sustantivo (MUS)"
+                onSaveManual={() => saveToDb(currentResults, false)}
+                isSaving={isSaving}
                 sidebarContent={sidebar} mainContent={main} certificationContent={<div className="mt-10 p-10 bg-[#0f172a] rounded-[3rem] text-center text-white text-[10px] font-black uppercase tracking-[0.4em] border border-slate-800">Uso Exclusivo Supervisor / Calidad</div>}
             />
 

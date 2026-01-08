@@ -251,14 +251,6 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                 <p className="text-[9px] font-bold text-slate-400 mt-2 uppercase">Partidas Bajo Revisión</p>
             </div>
 
-            <button
-                onClick={() => saveToDb(currentResults, false)}
-                disabled={isSaving}
-                className="w-full py-6 bg-slate-800 text-white rounded-[2rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-lg hover:bg-slate-700 transition-all flex items-center justify-center gap-3"
-            >
-                {isSaving ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-save"></i>}
-                Guardar Papel de Trabajo
-            </button>
         </div>
     );
 
@@ -271,7 +263,10 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                         <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Estrategia</div>
                         <button onClick={() => setHelpContent(AUDIT_HELP.STRATEGY)} className="text-slate-300 hover:text-indigo-500"><i className="fas fa-info-circle text-[10px]"></i></button>
                     </div>
-                    <div className="text-lg font-black text-indigo-600">{selectedInsight === 'RiskScoring' ? 'Smart Selection' : selectedInsight}</div>
+                    <div className="text-lg font-black text-indigo-600 flex items-center gap-2">
+                        {selectedInsight === 'RiskScoring' ? 'Smart Selection' : selectedInsight}
+                        <span className="px-2 py-0.5 bg-indigo-50 text-[7px] font-black text-indigo-400 rounded border border-indigo-100 uppercase">Analytics-Backed</span>
+                    </div>
                     <div className="text-[9px] text-slate-400 font-medium">Bajo Juicio Profesional</div>
                 </div>
                 <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm relative overflow-hidden group hover:border-slate-200 transition-colors">
@@ -449,6 +444,8 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
         <>
             <SharedResultsLayout
                 appState={appState} role={role} onBack={onBack} title="Muestreo No Estadístico: Panel de Control"
+                onSaveManual={() => saveToDb(currentResults, false)}
+                isSaving={isSaving}
                 sidebarContent={sidebar} mainContent={main}
                 certificationContent={
                     <div className="mt-10 p-10 bg-slate-900 rounded-[3rem] text-center border border-slate-800">

@@ -6,12 +6,15 @@ import Card from '../ui/Card';
 import { useToast } from '../ui/ToastContext';
 import Modal from '../ui/Modal';
 
+import { useAuth } from '../../services/AuthContext';
+
 interface Props {
     onPopulationSelected: (population: AuditPopulation) => void;
     onAddNew: () => void;
 }
 
 const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) => {
+    const { user } = useAuth();
     const [populations, setPopulations] = useState<AuditPopulation[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -19,8 +22,14 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
     const { addToast } = useToast();
 
     useEffect(() => {
-        fetchPopulations();
-    }, []);
+        if (user) {
+            fetchPopulations();
+        } else {
+            // Si no hay usuario, no cargamos nada o esperamos
+            // (El AuthContext manejará la redirección/login si fuera necesario, 
+            // pero aquí evitamos el fetch fallido)
+        }
+    }, [user]);
 
     const fetchPopulations = async () => {
         setLoading(true);
@@ -90,7 +99,7 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
                 </button>
             </div>
 
-            <Card className="border-t-4 border-t-blue-500">
+            <Card className="bg-white border-t-4 border-t-blue-500">
                 {loading && (
                     <div className="flex justify-center items-center h-48">
                         <div className="flex flex-col items-center">
@@ -122,7 +131,9 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
                         <table className="min-w-full divide-y divide-slate-200">
                             <thead className="bg-slate-50">
                                 <tr>
-                                    <th scope="col" className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Nombre del Archivo</th>
+                                    <th scope="col" className="px-6 py-4 text-left text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap">Nombre de Auditoría</th>
+                                    <th scope="col" className="px-6 py-4 text-left text-xs font-black text-slate-500 uppercase tracking-wider whitespace-nowrap">Área</th>
+                                    <th scope="col" className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Archivo Original</th>
                                     <th scope="col" className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Registros (N)</th>
                                     <th scope="col" className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Valor Total</th>
                                     <th scope="col" className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Fecha Carga</th>
@@ -134,11 +145,17 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
                                 {populations.map(pop => (
                                     <tr key={pop.id} className="hover:bg-blue-50/50 transition-colors duration-150">
                                         <td className="px-6 py-4 whitespace-nowrap">
+                                            <div className="text-sm font-black text-indigo-900">{pop.audit_name || 'SIN NOMBRE'}</div>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <span className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded text-[10px] font-black uppercase">{pop.area || 'GENERAL'}</span>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
                                             <div className="flex items-center">
-                                                <div className="flex-shrink-0 h-10 w-10 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center mr-3">
-                                                    <i className="fas fa-file-excel"></i>
+                                                <div className="flex-shrink-0 h-6 w-6 bg-slate-100 text-slate-400 rounded flex items-center justify-center mr-2">
+                                                    <i className="fas fa-file-excel text-[10px]"></i>
                                                 </div>
-                                                <div className="text-sm font-bold text-slate-700">{pop.file_name}</div>
+                                                <div className="text-[11px] font-medium text-slate-500 truncate max-w-[120px] italic">{pop.file_name}</div>
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-slate-600">{(pop.total_rows || 0).toLocaleString()}</td>

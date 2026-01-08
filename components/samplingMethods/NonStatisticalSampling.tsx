@@ -99,27 +99,28 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
         setSelectedInsight(type);
         let criteria = "";
         let justification = "";
+        const criticality = params.processCriticality || 'Medio';
 
         switch (type) {
             case 'RiskScoring':
-                criteria = "Estrategia 'Smart Selection' (Risk-Based): Algoritmo de extracción automatizada que prioriza unidades con alta densidad de alertas forenses. El sistema filtra y ordena el universo según un score ponderado donde convergen anomalías de Benford, valores atípicos, duplicidades y patrones de redondez sospechosos.";
-                justification = "Enfoque de Auditoría Basado en Riesgo Acumulado: Se ha determinado que la eficacia de la prueba se maximiza al inspeccionar los elementos que presentan simultáneamente múltiples factores de riesgo. Esta selección dirigida mitiga la posibilidad de omitir errores de integridad o irregularidades que quedarían ocultas bajo una selección aleatoria tradicional.";
+                criteria = "Estrategia 'Smart Selection' (Risk-Based): Algoritmo de extracción automatizada que prioriza unidades con alta densidad de alertas forenses. El sistema filtra y ordena el universo según un score ponderado donde convergen anomalías de Benford, valores atípicos, duplicidades y patrones de redondez.";
+                justification = `Enfoque de Auditoría Basado en Riesgo Acumulado (Consejo 2320-3 del IIA): Se ha determinado que la eficacia de la prueba, dada una criticidad ${criticality}, se maximiza al inspeccionar los elementos que presentan simultáneamente múltiples factores de riesgo. Esta selección dirigida mitiga la posibilidad de omitir irregularidades críticas.`;
                 break;
             case 'Benford':
-                criteria = "Selección sustantiva focalizada en registros cuyos montos transgreden las expectativas de frecuencia natural (Ley de Benford). Se priorizan transacciones con primeros dígitos anómalos.";
-                justification = "Indicadores de posibles irregularidades: Las desviaciones estadísticas significativas en los dígitos iniciales sugieren intervenciones manuales o fraccionamiento de importes, requiriendo una revisión exhaustiva para validar la veracidad de los soportes documentales.";
+                criteria = "Selección sustantiva focalizada en registros cuyos montos transgreden las expectativas de frecuencia natural (Ley de Benford).";
+                justification = `Confirmación de Condiciones (IIA 2320-3): Las desviaciones en los dígitos iniciales sugieren intervenciones manuales. Ante un proceso de criticidad ${criticality}, se requiere esta revisión para validar la veracidad de los soportes documentales sin depender de inferencia probabilística.`;
                 break;
             case 'Outliers':
-                criteria = "Extracción de partidas situadas en la periferia de la distribución (Outliers), identificadas técnicamente mediante el Rango Intercuartílico (IQR).";
-                justification = "Materialidad y Exposición: Al ser montos que rompen el patrón central de la población, representan el mayor impacto potencial para la formación de la opinión o errores materiales significativos aislados.";
+                criteria = "Extracción de partidas situadas en la periferia de la distribución (Outliers), identificadas mediante el Rango Intercuartílico (IQR).";
+                justification = `Materialidad e Insights Cualitativos: Al ser montos anómalos para un nivel de criticidad ${criticality}, representan el mayor impacto potencial. La selección busca confirmar la existencia de condiciones inusuales según el juicio profesional.`;
                 break;
             case 'Duplicates':
                 criteria = "Inspección de clústeres de datos con montos o atributos idénticos (Hallazgos Geométricos de Repetición).";
-                justification = "Evaluación de Integridad y Control: Se busca validar si las repeticiones obedecen a fallas en el control preventivo de pagos dobles, errores de registro en el ERP o intentos premeditados de duplicidad transaccional.";
+                justification = `Evaluación de Control Interno: Se busca validar si las repeticiones en este proceso (${criticality}) obedecen a fallas en el control preventivo, errores de registro o intentos premeditados de duplicidad.`;
                 break;
             case 'RoundNumbers':
                 criteria = "Selección de ítems con 'Redondeo Forense' (múltiplos significativos), técnica orientada a detectar estimaciones contables ad-hoc.";
-                justification = "Debilidad en el Soporte: Los números redondos son inusuales en operaciones comerciales naturales y frecuentemente se vinculan a comprobantes ficticios o ajustes manuales que carecen de una base de cálculo técnica real.";
+                justification = `Debilidad en el Soporte: Los números redondos son inusuales y frecuentemente se vinculan a ajustes manuales. Este enfoque descriptivo (IIA 2320-3) se centra en confirmar la razonabilidad de las transacciones más sospechosas en el área.`;
                 break;
         }
 
@@ -398,6 +399,29 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                                 />
                             </div>
                         )}
+                    </div>
+
+                    <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200">
+                        <h4 className="text-slate-900 font-black text-xs uppercase tracking-widest mb-4 flex items-center gap-2">
+                            Criticidad del Proceso
+                            <button onClick={(e) => showHelp(e, 'SKEWNESS' as any)} className="text-slate-300 hover:text-rose-400 transition-colors"><i className="fas fa-shield-halved text-xs"></i></button>
+                        </h4>
+                        <select
+                            value={params.processCriticality || 'Medio'}
+                            onChange={(e) => setAppState(prev => ({
+                                ...prev,
+                                samplingParams: {
+                                    ...prev.samplingParams,
+                                    nonStatistical: { ...prev.samplingParams.nonStatistical, processCriticality: e.target.value as any }
+                                }
+                            }))}
+                            className="w-full bg-white border border-slate-200 rounded-xl py-3 px-4 font-bold text-slate-800 shadow-sm focus:ring-4 focus:ring-rose-500/10 transition-all outline-none appearance-none"
+                        >
+                            <option value="Bajo">Bajo (Operativo)</option>
+                            <option value="Medio">Medio (Táctico)</option>
+                            <option value="Alto">Alto (Estratégico)</option>
+                            <option value="Crítico">Crítico (Vital/Cumplimiento)</option>
+                        </select>
                     </div>
 
                     <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200">

@@ -14,494 +14,277 @@ export const WarningIcon = () => (
     </svg>
 );
 
+// --- CONSTANTES TÉCNICAS ---
+export const RISK_MESSAGES = {
+    PILOT_PHASE: 'FASE PILOTO: Evaluación inicial de desviaciones (Stop-or-Go).',
+    TECH_EXPANSION_JUSTIFICATION: 'Ampliación técnica requerida por nivel de variabilidad detectado.',
+    PILOT_JUSTIFICATION: 'Calibración de parámetros sobre muestra inicial.',
+    CAV_PILOT_JUSTIFICATION: 'Estimación de desviación estándar operativa.',
+    TECH_EXPANSION: 'AMPLIACIÓN TÉCNICA'
+};
+
+export const METHODOLOGY_NOTES = {
+    STOP_OR_GO: 'Estrategia Stop-or-Go activada: Se inicia con n=25 según NIA 530.',
+    TECH_EXPANSION: 'Ampliación por Variabilidad: El tamaño de muestra se ajustó tras la fase piloto.',
+    MUS_PILOT: 'MUS Fase Piloto: Selección inicial para calibración de parámetros.',
+    CAV_PILOT: 'CAV Fase Piloto: Selección inicial para estimación de σ.'
+};
+
+export const PILOT_PHASE = 'PILOT_PHASE';
+export const STOP_OR_GO = 'STOP_OR_GO';
+
 export const ASSISTANT_CONTENT = {
     poblacionTotal: {
-        title: 'Población Total (N)',
+        title: "Población (Universo)",
         content: (
             <div className="space-y-4">
                 <RichInfoCard type="definition" title="Definición">
-                    Es el número total de unidades de muestreo (registros, facturas, líneas) que componen el universo sujeto a auditoría.
+                    Representa el conjunto completo de datos (N) sobre el cual se desea alcanzar una conclusión.
                 </RichInfoCard>
                 <RichInfoCard type="justification" title="Justificación Técnica">
-                    Necesario para determinar si aplica el "factor de corrección para poblaciones finitas" y para extrapolar los resultados de la muestra al total.
-                </RichInfoCard>
-                <RichInfoCard type="impact" title="Impacto en la Muestra (n)">
-                    Para poblaciones grandes (&gt;5,000), el tamaño tiene un impacto despreciable. En poblaciones pequeñas, reduce el tamaño de muestra requerido.
+                    En poblaciones grandes, el tamaño real tiene poco efecto, pero en universos pequeños (&lt; 500), el sistema aplica automáticamente el Factor de Corrección por Población Finita (FPCF) para evitar un sobremuestreo innecesario.
                 </RichInfoCard>
             </div>
-        ),
+        )
     },
     nivelConfianza: {
-        title: 'Nivel de Confianza (NC)',
+        title: "Nivel de Confianza (NC)",
         content: (
             <div className="space-y-4">
                 <RichInfoCard type="definition" title="Definición">
-                    Probabilidad estadística de que los resultados de la muestra representen fielmente a la población real (Complemento del Riesgo de Muestreo).
+                    Es el grado de seguridad deseado de que el porcentaje de desviación real en la población no excede el tolerable.
                 </RichInfoCard>
-                <RichInfoCard type="justification" title="Relación con el Riesgo">
-                    A mayor Nivel de Confianza, menor es el Riesgo de Aceptación Incorrecta (Beta) que el auditor está dispuesto a asumir.
-                </RichInfoCard>
-                <RichInfoCard type="impact" title="Impacto en la Muestra (n)">
-                    Relación Directa: Un mayor nivel de confianza (ej. 95% vs 90%) incrementa drásticamente el tamaño de la muestra.
-                </RichInfoCard>
-                <RichInfoCard type="standard" title="Rango Estándar">
-                    <ul className="list-disc list-inside">
-                        <li><strong>90% - 95%:</strong> Pruebas Sustantivas y de Cumplimiento estándar.</li>
-                        <li><strong>98% - 99%:</strong> Áreas críticas o forenses.</li>
-                    </ul>
+                <RichInfoCard type="justification" title="Justificación Técnica">
+                    Un incremento en el NC (ej. de 90% a 95%) aumenta directamente el tamaño de la muestra. Representa 1 - Riesgo de Aceptación Incorrecta (Riesgo Beta).
                 </RichInfoCard>
             </div>
-        ),
+        )
     },
     desviacionTolerable: {
-        title: 'Desviación Tolerable (ET)',
+        title: "Desviación Tolerable (ET)",
         content: (
             <div className="space-y-4">
                 <RichInfoCard type="definition" title="Definición">
-                    Tasa máxima de error o desviación que el auditor está dispuesto a aceptar en la población sin cambiar su evaluación de control.
+                    Es la tasa máxima de desviación que el auditor está dispuesto a aceptar sin invalidar el control. Funciona como un detector de calidad binario.
                 </RichInfoCard>
-                <RichInfoCard type="impact" title="Impacto en la Muestra (n)">
-                    Relación Inversa: Un ET más bajo (más estricto) requiere un tamaño de muestra significativamente mayor.
-                </RichInfoCard>
-                <RichInfoCard type="standard" title="Rango Estándar (NIA 530)">
-                    <ul className="list-disc list-inside">
-                        <li><strong>2% - 5%:</strong> Controles Críticos / Alto Riesgo.</li>
-                        <li><strong>6% - 10%:</strong> Controles Moderados / Bajo Riesgo.</li>
-                    </ul>
+                <RichInfoCard type="impact" title="Criterio de Evaluación">
+                    Si la tasa proyectada (UEL) supera este umbral, el control se dictamina como Inefectivo según NIA 530.
                 </RichInfoCard>
             </div>
-        ),
+        )
     },
     desviacionEsperada: {
-        title: 'Desviación Esperada (PE)',
+        title: "Desviación Esperada (PE)",
         content: (
             <div className="space-y-4">
                 <RichInfoCard type="definition" title="Definición">
-                    La tasa de error que el auditor anticipa encontrar antes de comenzar la prueba, basada en experiencia previa o pruebas piloto.
-                </RichInfoCard>
-                <RichInfoCard type="impact" title="Impacto en la Muestra (n)">
-                    Relación Directa: Cuantos más errores se esperan, mayor debe ser la muestra para confirmar que no exceden lo tolerable.
-                </RichInfoCard>
-                <RichInfoCard type="warning" title="Regla Crítica">
-                    El PE debe ser siempre menor que el ET. Si PE ≥ ET, el muestreo estadístico no es viable.
-                </RichInfoCard>
-                <RichInfoCard type="standard" title="Rango Estándar">
-                    Generalmente 0% (cero errores) o valores muy bajos (0.5% - 1.5%) para controles efectivos.
+                    Es la tasa de error que el auditor anticipa encontrar basado en experiencia previa. Si la PE aumenta, la muestra crece para mantener la precisión.
                 </RichInfoCard>
             </div>
-        ),
+        )
+    },
+    mus_ria: {
+        title: "Riesgo de Aceptación Incorrecta (RIA)",
+        content: (
+            <div className="space-y-4">
+                <RichInfoCard type="definition" title="Definición">
+                    Probabilidad de concluir que un control es eficaz cuando en realidad la tasa de error es superior a la tolerable.
+                </RichInfoCard>
+                <RichInfoCard type="impact" title="Relación con NC">
+                    Un RIA del 5% equivale a un Nivel de Confianza del 95%.
+                </RichInfoCard>
+            </div>
+        )
+    },
+    mus_intervalo: {
+        title: "Intervalo de Muestreo (IM)",
+        content: (
+            <div className="space-y-4">
+                <RichInfoCard type="definition" title="Definición">
+                    Distancia monetaria entre cada selección (V / n). Cada partida que iguale o supere este monto es extraída automáticamente al 100%.
+                </RichInfoCard>
+            </div>
+        )
+    },
+    mus_estrato: {
+        title: "Estrato de Certeza",
+        content: (
+            <div className="space-y-4">
+                <RichInfoCard type="definition" title="Definición">
+                    Grupo de registros cuyo valor es tan alto que su exclusión representaría un riesgo inaceptable. Se auditan al 100%.
+                </RichInfoCard>
+            </div>
+        )
     },
     valorTotalPoblacion: {
-        title: 'Valor Total de la Población (V)',
+        title: 'Valor Total (V)',
         content: (
             <div className="space-y-4">
                 <RichInfoCard type="definition" title="Definición">
                     Suma absoluta de los importes monetarios de todos los ítems en la población.
                 </RichInfoCard>
-                <RichInfoCard type="justification" title="Uso Técnico (MUS)">
-                    En MUS, este valor define el "tamaño" del universo sobre el cual se calcula el Intervalo de Muestreo. Cada unidad monetaria ($1) tiene la misma probabilidad de selección.
-                </RichInfoCard>
             </div>
-        ),
+        )
     },
     errorTolerable: {
-        title: 'Error Tolerable Monetario (TE)',
+        title: 'Error Tolerable (TE)',
         content: (
             <div className="space-y-4">
                 <RichInfoCard type="definition" title="Definición">
-                    Monto máximo de error monetario que puede existir en la cuenta sin que los estados financieros estén materialmente incorrectos (Materialidad de Ejecución).
-                </RichInfoCard>
-                <RichInfoCard type="impact" title="Impacto">
-                    Un TE menor (más estricto) reduce el intervalo de muestreo y aumenta el tamaño de la muestra.
-                </RichInfoCard>
-                <RichInfoCard type="standard" title="Rango Estándar">
-                    Generalmente 50% - 75% de la Materialidad Global.
+                    Monto máximo de error monetario que puede existir sin que los estados financieros estén materialmente incorrectos.
                 </RichInfoCard>
             </div>
-        ),
+        )
     },
     erroresPrevistos: {
-        title: 'Total de Errores Previstos (EE)',
+        title: 'Errores Previstos (EE)',
         content: (
             <div className="space-y-4">
                 <RichInfoCard type="definition" title="Definición">
-                    Estimación del monto total de error que ya existe en la población (Anticipación).
-                </RichInfoCard>
-                <RichInfoCard type="warning" title="Advertencia de Eficiencia">
-                    Si EE es alto (&gt;50% de TE), el método MUS se vuelve ineficiente y produce muestras excesivamente grandes. Considere CAV.
+                    Estimación del monto total de error que ya existe en la población.
                 </RichInfoCard>
             </div>
-        ),
+        )
     },
     riesgoAceptacionIncorrecta: {
-        title: 'Riesgo de Aceptación Incorrecta (RIA)',
+        title: 'Riesgo (RIA)',
         content: (
             <div className="space-y-4">
                 <RichInfoCard type="definition" title="Definición">
-                    Riesgo Beta: La probabilidad de concluir que el saldo es correcto cuando en realidad contiene un error material.
-                </RichInfoCard>
-                <RichInfoCard type="standard" title="Valores Estándar">
-                    <ul className="list-disc list-inside">
-                        <li><strong>5%:</strong> Alto nivel de seguridad (Confianza 95%).</li>
-                        <li><strong>10%:</strong> Nivel moderado (Confianza 90%).</li>
-                        <li><strong>37% - 50%:</strong> Cuando se confía plenamente en otros controles sustantivos.</li>
-                    </ul>
+                    Probabilidad de concluir que el saldo es correcto cuando en realidad contiene un error material.
                 </RichInfoCard>
             </div>
-        ),
+        )
     },
     desviacionEstandar: {
-        title: 'Variabilidad (Sigma σ)',
+        title: 'Variabilidad (σ)',
         content: (
             <div className="space-y-4">
                 <RichInfoCard type="definition" title="Definición">
-                    Es la medida de cuánto se alejan los importes individuales del promedio de la población. Representa la heterogeneidad de los montos evaluados.
-                </RichInfoCard>
-                <RichInfoCard type="impact" title="Impacto en la Muestra (n)">
-                    Relación Directa: A mayor dispersión (heterogeneidad), mayor será la muestra necesaria para obtener una estimación fiable.
-                </RichInfoCard>
-                <RichInfoCard type="tip" title="Calibración del Piloto">
-                    Al activar la opción "Muestra Piloto", el sistema calcula el Sigma real de los primeros 50 ítems. Si este Sigma es mayor al estimado inicialmente, el sistema sugerirá ampliar la muestra para mantener el Nivel de Confianza.
-                </RichInfoCard>
-                <RichInfoCard type="standard" title="Recomendación">
-                    Si la variabilidad es excesiva, considere la <strong>Estratificación</strong>. Dividir la población en grupos de montos similares reduce drásticamente el Sigma residual y, por tanto, el tamaño de la muestra.
+                    Medida de dispersión de los importes. A mayor variabilidad, mayor muestra necesaria.
                 </RichInfoCard>
             </div>
-        ),
+        )
     },
     muestraPiloto: {
-        title: 'Muestra Piloto (Pre-Muestreo)',
+        title: 'Piloto',
         content: (
             <div className="space-y-4">
-                <RichInfoCard type="formula" title="Propósito">
-                    Permite estimar la desviación estándar (σ) cuando no se tienen datos históricos confiables.
-                </RichInfoCard>
-                <RichInfoCard type="standard" title="Funcionamiento">
-                    El sistema toma una "foto" rápida de 50 registros para calibrar la variabilidad antes de calcular el tamaño final de la muestra (n). Esto evita muestras excesivamente grandes o insuficientes.
+                <RichInfoCard type="definition" title="Propósito">
+                    Estimación de la variabilidad real (Sigma) antes de calcular el tamaño final.
                 </RichInfoCard>
             </div>
         )
     },
     tecnicaEstimacion: {
-        title: 'Técnica de Estimación Post-Prueba',
+        title: 'Estimación',
         content: (
             <div className="space-y-4">
-                <RichInfoCard type="justification" title="Guía de Selección">
-                    <ul className="list-none space-y-3">
-                        <li className="pl-2 border-l-2 border-blue-200"><strong>Media por Unidad (Mean-per-Unit):</strong> Úsela si NO espera encontrar errores. Calcula el promedio de la muestra y lo multiplica por N.</li>
-                        <li className="pl-2 border-l-2 border-blue-200"><strong>Diferencia (Difference):</strong> Ideal cuando hay errores y estos tienden a ser constantes (ej. siempre fallan por $100). Requiere encontrar errores en la muestra.</li>
-                        <li className="pl-2 border-l-2 border-blue-200"><strong>Razón / Tasa Combinada (Ratio):</strong> Ideal cuando los errores son proporcionales al valor del ítem (ej. error del 5% del valor). Suele ser la más eficiente.</li>
-                        <li className="pl-2 border-l-2 border-blue-200"><strong>Regresión:</strong> Método avanzado para relaciones lineales complejas entre valor en libros y auditado.</li>
-                    </ul>
+                <RichInfoCard type="definition" title="Métodos">
+                    MPU (Media por Unidad), Diferencia o Razón.
                 </RichInfoCard>
             </div>
         )
     },
     estratificacion: {
-        title: 'Estratificación Obligatoria',
+        title: 'Estratificación',
         content: (
             <div className="space-y-4">
-                <RichInfoCard type="definition" title="Recomendación">
-                    En CAV, la estratificación es casi obligatoria. Sin ella, la variabilidad (σ) de la población completa suele ser tan alta que la fórmula resultará en un tamaño de muestra impráctico (ej. &gt;500).
-                </RichInfoCard>
-                <RichInfoCard type="tip" title="¿Cuándo NO usarla?">
-                    Solo si la población es extremadamente homogénea (ej. todas las transacciones son de $50.00 ± $1.00).
-                </RichInfoCard>
-            </div>
-        ),
-    },
-    cantidadEstratos: {
-        title: 'Cantidad de Estratos',
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="definition" title="Definición">
-                    Número de subgrupos en los que se dividirá la población. Cada grupo debe ser mutuamente excluyente.
-                </RichInfoCard>
-                <RichInfoCard type="standard" title="Práctica Común">
-                    Generalmente entre 3 y 5 estratos son suficientes para reducir significativamente la varianza.
-                </RichInfoCard>
-            </div>
-        )
-    },
-    metodoAsignacion: {
-        title: 'Método de Asignación',
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="justification" title="Opciones">
-                    <ul className="list-disc list-inside space-y-2">
-                        <li><strong>Proporcional:</strong> El tamaño de muestra de cada estrato es proporcional a su tamaño en la población.</li>
-                        <li><strong>Óptima (Neyman):</strong> Asigna más muestra a estratos con mayor variabilidad o valor monetario (más eficiente).</li>
-                    </ul>
-                </RichInfoCard>
-            </div>
-        )
-    },
-    umbralCerteza: {
-        title: 'Umbral de Certeza (Top Stratum)',
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="definition" title="Definición">
-                    Valor monetario a partir del cual todos los ítems serán seleccionados al 100%. En MUS, esto suele ser igual al Intervalo de Muestreo (J).
-                </RichInfoCard>
-                <RichInfoCard type="justification" title="Propósito: Cobertura">
-                    Garantiza que ninguna partida individualmente significativa (material) escape a la revisión. Esto optimiza la muestra aleatoria al "limpiar" la población de valores extremos.
-                </RichInfoCard>
-            </div>
-        )
-    },
-    estratoCerteza: {
-        title: 'Optimización: Estrato de Certeza',
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="definition" title="Definición">
-                    Estrategia que extrae automáticamente cualquier ítem cuyo valor sea superior al Intervalo de Muestreo (J).
-                </RichInfoCard>
-                <RichInfoCard type="justification" title="Papel en el Cálculo">
-                    Al extraer estos ítems al 100%, el sistema reduce el Valor Total (V) remanente y recalcula la muestra necesaria para el resto de la población, aumentando la eficiencia y precisión del alcance.
+                <RichInfoCard type="definition" title="Propósito">
+                    Dividir la población para reducir la variabilidad y el tamaño de muestra.
                 </RichInfoCard>
             </div>
         )
     },
     tratamientoNegativos: {
-        title: 'Tratamiento de Saldos Negativos',
+        title: 'Tratamiento de Negativos',
         content: (
             <div className="space-y-4">
-                <RichInfoCard type="definition" title="Contexto Matemático">
-                    El modelo MUS suma unidades monetarias positivas. Los valores negativos (ej. notas de crédito, saldos acreedores) distorsionan la selección sistemática.
-                </RichInfoCard>
-                <RichInfoCard type="standard" title="Opciones Técnicas">
-                    <ul className="list-disc list-inside space-y-2">
-                        <li><strong>Segregar:</strong> Extraerlos a un reporte aparte para auditoría manual (Práctica recomendada por NIA).</li>
-                        <li><strong>Valor Absoluto:</strong> Convertirlos a positivos. Útil si se desea que tengan probabilidad de ser seleccionados, aunque requiere ajustes en la inferencia final.</li>
-                        <li><strong>Cero:</strong> Ignorarlos en el cálculo del intervalo (No recomendado si son materiales).</li>
-                    </ul>
+                <RichInfoCard type="definition" title="Definición">
+                    Define cómo se manejan los saldos acreedores en MUS (Segregar, Valor Cero o Absoluto).
                 </RichInfoCard>
             </div>
         )
     },
-    semilla: {
-        title: 'Mecanismo de Semilla (Seed)',
+    cantidadEstratos: {
+        title: "Cantidad de Estratos",
         content: (
             <div className="space-y-4">
-                <RichInfoCard type="definition" title="Definición">
-                    Valor inicial para el algoritmo generador de números pseudoaleatorios (PRNG).
+                <RichInfoCard type="definition" title="Propósito">
+                    Divide el universo en grupos homogéneos para reducir la varianza interna.
                 </RichInfoCard>
-                <RichInfoCard type="standard" title="Propósito: Replicabilidad">
-                    Permite que cualquier tercero (ej. regulador o revisor de calidad) genere <strong>exactamente la misma muestra</strong> utilizando los mismos parámetros, garantizando transparencia.
-                </RichInfoCard>
-            </div>
-        ),
-    },
-    criterioJuicio: {
-        title: 'Criterio de Juicio Profesional',
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="definition" title="Definición">
-                    Selección intencional basada en la experiencia del auditor para cubrir riesgos específicos (ej. partidas sospechosas, montos redondos, proveedores nuevos).
-                </RichInfoCard>
-                <RichInfoCard type="warning" title="Limitación Importante">
-                    No permite extrapolación estadística. Los resultados solo aplican a los elementos seleccionados, no a toda la población.
-                </RichInfoCard>
-            </div>
-        ),
-    },
-    tablaVista: {
-        title: 'Tabla o Vista de Base de Datos',
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="definition" title="Fuente de Datos">
-                    Objeto de la base de datos que contiene el universo completo.
-                </RichInfoCard>
-                <RichInfoCard type="justification" title="Integridad">
-                    Se recomienda usar Vistas (Views) inmutables para garantizar que la población no cambie durante la auditoría.
-                </RichInfoCard>
-            </div>
-        ),
-    },
-    columnaId: {
-        title: 'Columna de ID Única',
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="definition" title="Definición">
-                    Campo clave (PK) que permite identificar inequívocamente cada registro (ej. Numero_Factura, ID_Asiento).
-                </RichInfoCard>
-                <RichInfoCard type="impact" title="Propósito">
-                    Esencial para localizar la evidencia física o digital de los ítems seleccionados en la muestra.
-                </RichInfoCard>
-            </div>
-        ),
-    },
-    columnaValor: {
-        title: 'Columna de Valor Monetario',
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="definition" title="Definición">
-                    Campo numérico que contiene el importe financiero a auditar.
-                </RichInfoCard>
-                <RichInfoCard type="justification" title="Tratamiento">
-                    Para MUS, se utilizan valores absolutos. Asegúrese de que no haya campos nulos o formatos de texto.
-                </RichInfoCard>
-            </div>
-        ),
-    },
-    muestraRepresentativa: {
-        title: 'Tamaño de Muestra Representativa',
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="definition" title="Determinación del Tamaño">
-                    Es el número de registros necesarios para que el auditor pueda extrapolar sus hallazgos al universo total con un margen de error conocido.
-                </RichInfoCard>
-                <RichInfoCard type="impact" title="Cálculo en MUS">
-                    Se deriva de dividir el Valor Total entre el Intervalo J. Incluye tanto el <strong>Estrato de Certeza</strong> (partidas grandes al 100%) como la <strong>Muestra Aleatoria</strong>.
+                <RichInfoCard type="impact" title="Efecto">
+                    A mayor número de estratos (bandas), mayor es la eficiencia del muestreo, permitiendo reducir n sin aumentar el riesgo.
                 </RichInfoCard>
             </div>
         )
     },
-    // Mapeo de Columnas
+    metodoAsignacion: {
+        title: "Método de Asignación",
+        content: (
+            <div className="space-y-4">
+                <RichInfoCard type="definition" title="Algoritmo">
+                    Define cómo se distribuye la muestra (n) entre los estratos (nh).
+                </RichInfoCard>
+                <RichInfoCard type="impact" title="Neyman vs Proporcional">
+                    Neyman es óptimo para detectar fraudes o errores en poblaciones con alta variabilidad.
+                </RichInfoCard>
+            </div>
+        )
+    },
+    umbralCerteza: {
+        title: "Umbral de Certeza",
+        content: (
+            <div className="space-y-4">
+                <RichInfoCard type="definition" title="Materialidad Individual">
+                    Define un monto a partir del cual todos los registros se auditan al 100% (Capa de Certeza).
+                </RichInfoCard>
+            </div>
+        )
+    },
     mappingUniqueId: {
-        title: "ID Único (Transacción/Factura)",
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="definition" title="Definición">
-                    Columna que identifica de forma irrepetible cada registro.
-                </RichInfoCard>
-                <RichInfoCard type="impact" title="Uso en Análisis">
-                    <ul className="list-disc list-inside">
-                        <li><strong>Básico:</strong> Permite la selección exacta de la muestra y evita errores de duplicidad en el conteo.</li>
-                        <li><strong>Forense:</strong> Esencial para la prueba de Integridad Secuencial y detección de saltos en folios.</li>
-                        <li><strong>Insights & EDA:</strong> Identifica valores extremos (Mín/Máx) y referencia ítems con riesgo crítico.</li>
-                    </ul>
-                </RichInfoCard>
-            </div>
-        )
+        title: 'ID Único',
+        content: <RichInfoCard type="definition" title="Definición">Columna que identifica de forma inequívoca cada registro (ej. Nº de Factura, ID Transacción).</RichInfoCard>
     },
     mappingMonetary: {
-        title: "Valor Monetario / Importe",
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="definition" title="Definición">
-                    Columna que contiene el valor económico de la transacción.
-                </RichInfoCard>
-                <RichInfoCard type="impact" title="Uso en Análisis">
-                    <ul className="list-disc list-inside">
-                        <li><strong>Básico:</strong> Base para materialidad, error proyectado y desviación estándar.</li>
-                        <li><strong>Forense:</strong> Alimenta la Ley de Benford, Detección de Outliers y Fraccionamiento.</li>
-                        <li><strong>Insights & EDA:</strong> Determina el Factor de Tamaño Relativo (RSF) y el Valor Neto de la población.</li>
-                    </ul>
-                </RichInfoCard>
-            </div>
-        )
+        title: 'Valor Monetario',
+        content: <RichInfoCard type="definition" title="Definición">Importe principal del registro sobre el cual se proyectarán los errores estadísticos.</RichInfoCard>
     },
     mappingCategory: {
-        title: "Categoría (Var Principal)",
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="definition" title="Definición">
-                    Agrupador principal (ej. Centro de Costos, Cuenta Contable, Unidad de Negocio).
-                </RichInfoCard>
-                <RichInfoCard type="impact" title="Uso en Análisis">
-                    <ul className="list-disc list-inside">
-                        <li><strong>Básico:</strong> Permite el Muestreo Estratificado y la segmentación de resultados.</li>
-                        <li><strong>Forense:</strong> Base para el Análisis de Entropía (combinaciones inusuales).</li>
-                        <li><strong>Insights & EDA:</strong> Segmenta los hallazgos en el Perfil de Riesgo y el resumen descriptivo.</li>
-                    </ul>
-                </RichInfoCard>
-            </div>
-        )
+        title: 'Categoría',
+        content: <RichInfoCard type="definition" title="Definición">Variable cualitativa para segmentar o aplicar pruebas de duplicados y frecuencia.</RichInfoCard>
     },
     mappingSubcategory: {
-        title: "Subcategoría",
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="definition" title="Definición">
-                    Nivel de detalle secundario para refinar la clasificación descriptiva.
-                </RichInfoCard>
-                <RichInfoCard type="impact" title="Uso en Análisis">
-                    <ul className="list-disc list-inside">
-                        <li><strong>Forense:</strong> Refina la detección de anomalías en jerarquías profundas de datos.</li>
-                        <li><strong>Insights:</strong> Proporciona el contexto cualitativo necesario para entender la naturaleza de una excepción.</li>
-                    </ul>
-                </RichInfoCard>
-            </div>
-        )
+        title: 'Subcategoría',
+        content: <RichInfoCard type="definition" title="Definición">Segundo nivel de detalle para análisis multivariable o estratificación por ítems.</RichInfoCard>
     },
     mappingDate: {
-        title: "Fecha de Transacción",
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="definition" title="Definición">
-                    Fecha en que ocurrió el evento auditado.
-                </RichInfoCard>
-                <RichInfoCard type="impact" title="Uso en Análisis">
-                    <ul className="list-disc list-inside">
-                        <li><strong>Básico:</strong> Define la estacionalidad y el alcance temporal de la auditoría.</li>
-                        <li><strong>Forense:</strong> Habilita el análisis de operaciones en fines de semana y días festivos.</li>
-                        <li><strong>Insights & EDA:</strong> Genera las 'Estadísticas Cronológicas' y detecta brechas de actividad.</li>
-                    </ul>
-                </RichInfoCard>
-            </div>
-        )
+        title: 'Fecha',
+        content: <RichInfoCard type="definition" title="Definición">Fecha de la transacción, esencial para pruebas de corte y análisis temporal.</RichInfoCard>
     },
     mappingUser: {
-        title: "Usuario / Actor",
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="definition" title="Definición">
-                    Identifica a la persona responsable de la creación o aprobación del registro.
-                </RichInfoCard>
-                <RichInfoCard type="impact" title="Uso en Análisis">
-                    <ul className="list-disc list-inside">
-                        <li><strong>Forense:</strong> Habilita el **Perfilado de Actores**, detectando patrones de riesgo concentrados en individuos.</li>
-                        <li><strong>Insights:</strong> Atribuye responsabilidades directas en la detección de posibles colusiones o negligencias.</li>
-                    </ul>
-                </RichInfoCard>
-            </div>
-        )
+        title: 'Usuario / Responsable',
+        content: <RichInfoCard type="definition" title="Definición">Identifica quién ejecutó la acción, clave para detectar segregación de funciones.</RichInfoCard>
     },
     mappingVendor: {
-        title: "Proveedor / Tercero",
-        content: (
-            <div className="space-y-4">
-                <RichInfoCard type="definition" title="Definición">
-                    Identifica a la contraparte externa de la transacción.
-                </RichInfoCard>
-                <RichInfoCard type="impact" title="Uso en Análisis">
-                    <ul className="list-disc list-inside">
-                        <li><strong>Forense:</strong> Crucial para detectar fraccionamiento de compras y dependencia inusual de proveedores.</li>
-                        <li><strong>Insights & EDA:</strong> Muestra la diversidad de la cadena de suministro y destaca terceros con perfiles de alerta.</li>
-                    </ul>
-                </RichInfoCard>
-            </div>
-        )
+        title: 'Proveedor / Cliente',
+        content: <RichInfoCard type="definition" title="Definición">Entidad externa involucrada; permite detectar concentraciones de riesgo.</RichInfoCard>
     },
     mappingTimestamp: {
-        title: "Hora / Marca de Tiempo",
+        title: 'Marca de Tiempo',
+        content: <RichInfoCard type="definition" title="Definición">Hora exacta del registro para detectar actividad en horarios no laborales.</RichInfoCard>
+    },
+    upload_help: {
+        title: 'Ayuda de Carga',
         content: (
             <div className="space-y-4">
-                <RichInfoCard type="definition" title="Definición">
-                    Hora exacta del registro.
+                <RichInfoCard type="definition" title="Instrucciones">
+                    Cargue un archivo .xlsx o .csv. Asegúrese de que tenga encabezados claros.
                 </RichInfoCard>
-                <RichInfoCard type="impact" title="Uso en Análisis">
-                    <ul className="list-disc list-inside">
-                        <li><strong>Forense:</strong> Habilita la prueba de 'Horarios Sospechosos' (detectando actividad fuera de jornada o en madrugadas).</li>
-                        <li><strong>Insights:</strong> Aporta precisión forense al reconstruir la cronología de eventos críticos.</li>
-                    </ul>
+                <RichInfoCard type="impact" title="Requisitos">
+                    Se requiere al menos una columna de ID único. Si va a realizar muestreo monetario, requiere una columna de valor.
                 </RichInfoCard>
             </div>
         )
     }
-};
-
-export const RISK_MESSAGES = {
-    PILOT_PHASE: "Fase Piloto",
-    PILOT_JUSTIFICATION: "Registro de calibración inicial.",
-    TECH_EXPANSION: "Ampliación Técnica",
-    TECH_EXPANSION_JUSTIFICATION: "Registro seleccionado para completar el tamaño representativo de la población.",
-    CAV_PILOT_JUSTIFICATION: "Registro para cálculo de varianza real.",
-};
-
-export const METHODOLOGY_NOTES = {
-    STOP_OR_GO: "Iniciado procedimiento Stop-or-Go (n=25).",
-    MUS_PILOT: "Fase 1: Muestra Piloto iniciada para calibración de parámetros monetarios.",
-    CAV_PILOT: "Fase 1: Muestra Piloto para determinación científica de la desviación estándar (Sigma).",
 };

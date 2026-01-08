@@ -1,7 +1,6 @@
 
 import React from 'react';
-import { SamplingMethod, AuditPopulation } from '../../types';
-import { AppView } from '../../App';
+import { SamplingMethod, AuditPopulation, AppView } from '../../types';
 import { SamplingMethodCard, MethodConfig } from './SamplingMethodCard';
 
 interface Props {
@@ -47,13 +46,13 @@ const methods: MethodConfig[] = [
         description: 'Divide la población en subgrupos homogéneos para eficiencia.',
         icon: 'fa-layer-group',
         colors: {
-            bg: 'bg-indigo-600',
-            hoverBg: 'hover:bg-indigo-700',
-            iconBg: 'bg-indigo-500',
+            bg: 'bg-violet-700',
+            hoverBg: 'hover:bg-violet-800',
+            iconBg: 'bg-violet-600',
             iconText: 'text-white',
             titleText: 'text-white',
-            descriptionText: 'text-indigo-200',
-            linkText: 'text-indigo-100'
+            descriptionText: 'text-violet-100',
+            linkText: 'text-violet-50'
         }
     },
     {

@@ -18,6 +18,8 @@ interface Props {
     mainContent?: React.ReactNode;
     children?: React.ReactNode;
     certificationContent: React.ReactNode;
+    onSaveManual?: () => void;
+    isSaving?: boolean;
 }
 
 interface AnalysisResult {
@@ -28,7 +30,8 @@ interface AnalysisResult {
 
 const SharedResultsLayout: React.FC<Props> = ({
     appState, role, onBack, title, subtitle,
-    sidebarContent, mainContent, children, certificationContent
+    sidebarContent, mainContent, children, certificationContent,
+    onSaveManual, isSaving
 }) => {
     const [analysisResults, setAnalysisResults] = useState<AnalysisResult[] | null>(null);
     const [showModal, setShowModal] = useState(false);
@@ -132,7 +135,17 @@ const SharedResultsLayout: React.FC<Props> = ({
                         <button onClick={handleExportExcel} className="px-6 py-3 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 hover:text-white transition-all">
                             Exportar Excel
                         </button>
-                        <button onClick={() => generateAuditReport(appState)} className="px-6 py-3 bg-indigo-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all">
+                        {onSaveManual && (
+                            <button
+                                onClick={onSaveManual}
+                                disabled={isSaving}
+                                className="px-6 py-3 bg-[#ccff00] text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-[#bbe600] transition-all shadow-lg shadow-emerald-400/20 flex items-center gap-2"
+                            >
+                                {isSaving ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-save"></i>}
+                                Guardar Trabajo
+                            </button>
+                        )}
+                        <button onClick={() => generateAuditReport(appState)} className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all">
                             Generar Reporte PDF
                         </button>
                     </div>

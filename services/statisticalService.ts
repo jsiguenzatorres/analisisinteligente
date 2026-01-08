@@ -1,4 +1,4 @@
-import { AppState, AuditResults, SamplingMethod, AuditSampleItem, AuditDataRow, PilotMetrics } from '../types';
+import { AppState, AuditResults, SamplingMethod, AuditSampleItem, AuditDataRow, PilotMetrics, StratumMetadata, ColumnMapping } from '../types';
 import { RISK_MESSAGES, METHODOLOGY_NOTES } from '../constants';
 
 export const formatMoney = (amount: number) => {
@@ -13,6 +13,45 @@ export const formatMoney = (amount: number) => {
 const LCG_MULTIPLIER = 9301;
 const LCG_INCREMENT = 49297;
 const LCG_MODULUS = 233280;
+
+// --- TABLAS TÉCNICAS NIA 530 ---
+
+/**
+ * Factores de Confiabilidad (FC) basados en distribución de Poisson.
+ * Se usan para MUS y Atributos cuando se esperan 0 errores.
+ */
+export const RELIABILITY_FACTORS: Record<number, number> = {
+    99: 4.61,
+    95: 3.00,
+    90: 2.31,
+    85: 1.90,
+    80: 1.61,
+    75: 1.39,
+    50: 0.70
+};
+
+/**
+ * Factores de Expansión (FE) para MUS.
+ * Se usan cuando se esperan errores (PE > 0).
+ */
+export const EXPANSION_FACTORS: Record<number, number> = {
+    99: 1.9,
+    95: 1.6,
+    90: 1.5,
+    85: 1.4,
+    80: 1.3,
+    75: 1.25,
+    50: 1.15
+};
+
+/**
+ * Tabla de Factores R (Poisson acumulada) para evaluación de Atributos/MUS
+ * Relaciona NC y número de desviaciones encontradas (k).
+ */
+export const POISSON_TABLE: Record<number, Record<number, number>> = {
+    95: { 0: 3.00, 1: 4.75, 2: 6.30, 3: 7.76, 4: 9.16, 5: 10.52, 6: 11.85, 7: 13.15, 8: 14.44, 9: 15.71, 10: 16.97 },
+    90: { 0: 2.31, 1: 3.89, 2: 5.33, 3: 6.69, 4: 8.00, 5: 9.28, 6: 10.54, 7: 11.78, 8: 13.00, 9: 14.21, 10: 15.41 },
+};
 
 // Helper local para generar ítems
 // Helper local para selección sistemática (Intervalo Constante)
@@ -201,14 +240,19 @@ export const calculateCustomFormula = (
     if (den === 0) return { n: 0, formula: "Error: TE es 0", details: "División por cero" };
 
     const rawN = num / den;
-    const n = Math.ceil(rawN);
+    let n = Math.ceil(rawN);
 
-    const formulaStr = `n = (${Z}^2 * ${alpha.toFixed(2)} * ${totalPopulation}) / ${tolerableError}^2 = ${Math.ceil(rawN)}`;
+    // Ajuste FPCF (Población Finita) - NIA 530
+    if (n / totalPopulation > 0.05) {
+        n = Math.ceil(n / (1 + (n / totalPopulation)));
+    }
+
+    const formulaStr = `n = (${Z}^2 * ${alpha.toFixed(2)} * ${totalPopulation}) / ${tolerableError}^2 -> FPCF applied if >5%`;
 
     return {
         n,
         formula: formulaStr,
-        details: `Cálculo basado en fórmula de usuario: ROUNDUP((Z^2 * (1-Conf) * Pob) / TE^2)`
+        details: `Cálculo basado en fórmula de usuario con ajuste por población finita (FPCF).`
     };
 };
 
@@ -237,30 +281,52 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
     const methodologyNotes: string[] = [];
     const seed = appState.generalParams.seed;
     let sample: AuditSampleItem[] = [];
-    let pilotMetrics: PilotMetrics | null = null;
+    let pilotMetrics: PilotMetrics | undefined;
+    let resultsMetadata: { strataMetadata?: StratumMetadata[] } = {};
 
     switch (samplingMethod) {
         case SamplingMethod.Attribute:
             const attr = samplingParams.attribute;
+            const N_attr = realRows.length > 0 ? realRows.length : attr.N;
+
             if (attr.useSequential) {
                 sampleSize = 25;
                 methodologyNotes.push(METHODOLOGY_NOTES.STOP_OR_GO);
                 sample = selectItems(sampleSize, seed, realRows, () => ({ is_pilot_item: true, risk_flag: RISK_MESSAGES.PILOT_PHASE }));
                 pilotMetrics = { type: 'ATTR_PILOT', phase: 'PILOT_ONLY', initialSize: 25 };
             } else {
-                // Factores R exactos según guía metodológica de usuario
-                let rFactorAttr = 2.3; // Default (90-94%)
-                if (attr.NC >= 99) rFactorAttr = 4.6;
-                else if (attr.NC >= 95) rFactorAttr = 3.0;
+                // NIA 530: Muestreo de Atributos (Fórmula de Proporciones + FPCF)
+                const Z_val = attr.NC >= 99 ? 2.576 : attr.NC >= 95 ? 1.96 : 1.645;
+                const p = 0.5; // Probabilidad conservadora (peor escenario)
+                const q = 1 - p;
+                const E = attr.ET / 100;
 
-                // Fórmula: (R * 100) / (ET - PE) (Manteniendo ajuste de PE estándar)
-                sampleSize = Math.ceil((rFactorAttr * 100) / (attr.ET - attr.PE));
+                // n = (Z² * p * q) / E²
+                let n0 = Math.ceil((Math.pow(Z_val, 2) * p * q) / Math.pow(E, 2));
+
+                // Ajuste por Población Finita (FPCF) si n/N > 0.05
+                if (n0 / N_attr > 0.05) {
+                    sampleSize = Math.ceil((n0 * N_attr) / (n0 + N_attr));
+                    methodologyNotes.push(`Población Finita: Ajuste aplicado (N=${N_attr}).`);
+                } else {
+                    sampleSize = n0;
+                }
+
+                // Asegurar que PE impacte si es alto (Modelo de Factores R)
+                if (attr.PE > 0) {
+                    const fcAttr = RELIABILITY_FACTORS[attr.NC] || 3.0;
+                    const nFactors = Math.ceil((fcAttr * 100) / (attr.ET - attr.PE));
+                    sampleSize = Math.max(sampleSize, nFactors);
+                }
+
                 sample = selectItems(sampleSize, seed, realRows, () => ({}));
+                methodologyNotes.push(`Atributos: Fórmulas de proporciones NIA 530 (Z=${Z_val}).`);
             }
             break;
 
         case SamplingMethod.MUS:
             const mus = samplingParams.mus;
+            const N_mus = realRows.length;
 
             // PIPELINE NIA 530 - ETAPA A: Tratamiento de Negativos
             let processedRows = [...realRows];
@@ -294,27 +360,53 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
 
             // Recalcular V efectivo tras tratamiento de negativos
             const effectiveV = processedRows.reduce((acc, curr) => acc + (curr.monetary_value_col || 0), 0);
-            const confidenceFactorMUS = 3.0; // Fixed 95%
-            const samplingInterval = mus.TE / confidenceFactorMUS;
 
-            // PIPELINE NIA 530 - ETAPA B: Estrato de Certeza (Top-Stratum)
+            // MUS: Cálculo exacto basado en Factores de Confiabilidad y Expansión
+            const ncKey = mus.RIA <= 5 ? 95 : 90; // Mapeo de RIA a NC
+            const fcMus = RELIABILITY_FACTORS[ncKey] || 3.0;
+            const feMus = EXPANSION_FACTORS[ncKey] || 1.6;
+
+            // n = (V * FC) / (TE - (EE * FE))
+            const numerator = effectiveV * fcMus;
+            const denominator = mus.TE - (mus.EE * feMus);
+
+            if (denominator <= 0) {
+                // Escenario donde el error esperado + expansión devora la materialidad
+                sampleSize = Math.min(processedRows.length, 500); // Límite técnico de seguridad
+                methodologyNotes.push("Advertencia MUS: El error esperado supera la capacidad del modelo. Se aplica tamaño máximo prudencial.");
+            } else {
+                sampleSize = Math.ceil(numerator / denominator);
+            }
+
+            const samplingInterval = effectiveV / sampleSize;
+
+            // PIPELINE NIA 530 - ETAPA B: Estrato de Certeza (Top-Stratum) e Integración Forense
             let topStratumItems: AuditSampleItem[] = [];
             let statisticalPopulation = [...processedRows];
 
             if (mus.optimizeTopStratum) {
-                const certaintyItems = processedRows.filter(r => (r.monetary_value_col || 0) >= samplingInterval);
-                statisticalPopulation = processedRows.filter(r => (r.monetary_value_col || 0) < samplingInterval);
+                // Partidas por materialidad (>= IM) + Partidas por Riesgo Forense (Score > 80)
+                const certaintyItems = processedRows.filter(r =>
+                    (r.monetary_value_col || 0) >= samplingInterval ||
+                    (r.risk_score || 0) >= 80
+                );
+                statisticalPopulation = processedRows.filter(r =>
+                    (r.monetary_value_col || 0) < samplingInterval &&
+                    (r.risk_score || 0) < 80
+                );
 
                 topStratumItems = certaintyItems.map(r => ({
                     id: String(r.unique_id_col),
                     value: r.monetary_value_col || 0,
-                    risk_flag: 'TOP_STRATUM',
-                    risk_justification: `Ítem excede el intervalo de muestreo (${formatMoney(samplingInterval)}). Extraído al 100% por materialidad.`,
+                    risk_flag: (r.risk_score || 0) >= 80 ? 'PARTIDA_CLAVE' : 'TOP_STRATUM',
+                    risk_justification: (r.risk_score || 0) >= 80
+                        ? `Selección obligatoria por alto score forense (${r.risk_score}). Banderas: ${(r.risk_factors || []).join(', ')}`
+                        : `Ítem excede el intervalo de muestreo (${formatMoney(samplingInterval)}). Extraído al 100% por materialidad.`,
                     is_manual_selection: true,
                     absolute_value: (r as any)._is_originally_negative ? r.monetary_value_col : undefined
                 }));
 
-                methodologyNotes.push(`Estrato Certeza: Se extrajeron ${certaintyItems.length} ítems claves que superan el intervalo.`);
+                methodologyNotes.push(`Selección Clave: ${certaintyItems.length} ítems extraídos al 100% (Materialidad o Riesgo Alto).`);
             }
 
             // PIPELINE NIA 530 - ETAPA C: Selección Estadística Sistemática
@@ -354,7 +446,7 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
 
         case SamplingMethod.Stratified:
             const st = samplingParams.stratified;
-            const targetTotalN = st.usePilotSample ? 50 : 100;
+            const targetTotalN = st.sampleSize || 100;
 
             // 1. Capa de Certeza (100% Extraction)
             const certaintyThreshold = st.certaintyStratumThreshold || Infinity;
@@ -367,7 +459,8 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
                 risk_flag: 'CERTEZA_ESTRAT.',
                 risk_justification: `Ítem excede el umbral de materialidad del estrato superior (${formatMoney(certaintyThreshold)}).`,
                 is_manual_selection: true,
-                stratum_label: 'Certeza'
+                stratum_label: 'Certeza',
+                raw_row: r.raw_json
             }));
 
             // 2. Agrupación por Estratos
@@ -382,15 +475,12 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
                     if (group.length > 0) groupMap.set(`E${i + 1}`, group);
                 }
             } else {
-                // Soporte Multivariable (Cat + Subcat)
-                const variables = st.basis === 'MultiVariable'
-                    ? (st.selectedVariables || [])
-                    : [st.basis];
-
+                const variables = st.basis === 'MultiVariable' ? (st.selectedVariables || []) : [st.basis];
                 residualStratifiedPop.forEach(r => {
                     const raw = r.raw_json || {};
                     const key = variables.map((v: string) => {
-                        const col = appState.selectedPopulation?.column_mapping[v.toLowerCase() as 'category' | 'subcategory'];
+                        const colKey = v.toLowerCase() as keyof ColumnMapping;
+                        const col = appState.selectedPopulation?.column_mapping[colKey];
                         return String(raw[col as string] || 'Otros');
                     }).join(' | ');
 
@@ -400,33 +490,63 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
             }
 
             // 3. Asignación y Selección
-            let stratifiedSample: AuditSampleItem[] = [];
-            const manualAllocations = st.manualAllocations as Record<string, number>;
+            let stratifiedSampleList: AuditSampleItem[] = [];
+            const strataMetadataList: StratumMetadata[] = [];
 
-            if (manualAllocations) {
-                // PRIORIDAD: Alocación Manual (Juicio del Auditor)
+            if (certaintyResults.length > 0) {
+                strataMetadataList.push({
+                    label: 'Certeza',
+                    populationSize: certaintyResults.length,
+                    populationValue: certaintyResults.reduce((acc, curr) => acc + (curr.value || 0), 0),
+                    sampleSize: certaintyResults.length
+                });
+            }
+
+            const isManual = st.allocationMethod === 'Manual' && st.manualAllocations;
+            if (isManual) {
+                const manualAllocations = st.manualAllocations as Record<string, number>;
                 Object.entries(manualAllocations).forEach(([key, nh]) => {
                     const groupRows = groupMap.get(key);
                     if (groupRows && nh > 0) {
                         const subSample = selectItems(Math.min(nh, groupRows.length), seed, groupRows, () => ({
                             stratum_label: key
                         }));
-                        stratifiedSample = [...stratifiedSample, ...subSample];
+                        stratifiedSampleList = [...stratifiedSampleList, ...subSample];
+                        strataMetadataList.push({
+                            label: key,
+                            populationSize: groupRows.length,
+                            populationValue: groupRows.reduce((acc, curr) => acc + (curr.monetary_value_col || 0), 0),
+                            sampleSize: subSample.length
+                        });
                     }
                 });
             } else {
-                // ASIGNACIÓN AUTOMÁTICA (FALLBACK)
-                const nToAllocate = Math.max(0, targetTotalN - certaintyResults.length);
                 const totalNResidual = residualStratifiedPop.length;
+                const totalVResidual = residualStratifiedPop.reduce((a, b) => a + (b.monetary_value_col || 0), 0);
+
+                // --- ETAPA A: CÁLCULO DE N TOTAL TEÓRICO (NIA 530) ---
+                // n = (N * Z * sigma / TE)^2 -> Usamos sigma global de la población residual si no hay piloto
+                const Z = st.NC === 99 ? 2.576 : st.NC === 95 ? 1.96 : 1.645;
+                const sigmaGlobal = appState.selectedPopulation?.descriptive_stats?.std_dev || (totalVResidual / Math.sqrt(totalNResidual || 1));
+                const TE_absoluto = (st.ET / 100) * (appState.selectedPopulation?.total_monetary_value || 1);
+
+                let theoreticalN = Math.ceil(Math.pow((totalNResidual * Z * sigmaGlobal) / Math.max(1, TE_absoluto), 2));
+
+                // Ajuste FPCF para estratificado
+                if (theoreticalN / totalNResidual > 0.05) {
+                    theoreticalN = Math.ceil(theoreticalN / (1 + theoreticalN / totalNResidual));
+                }
+
+                const nToAllocate = st.sampleSize || Math.min(theoreticalN, totalNResidual);
+                methodologyNotes.push(`Tamaño objetivo: ${nToAllocate} ítems (Basado en ${st.sampleSize ? 'Juicio' : 'Cálculo Estadístico'}).`);
 
                 if (totalNResidual > 0) {
-                    const strataKeys = Array.from(groupMap.keys());
-                    const strataMetrics = strataKeys.map(key => {
+                    const strataMetrics = Array.from(groupMap.keys()).map(key => {
                         const rows = groupMap.get(key)!;
                         const vals = rows.map(r => r.monetary_value_col || 0);
-                        const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+                        const mean = vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length);
                         const variance = vals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / Math.max(1, vals.length - 1);
-                        return { key, count: rows.length, stdDev: Math.sqrt(variance) };
+                        return { key, count: rows.length, stdDev: Math.sqrt(variance), totalValue: vals.reduce((a, b) => a + b, 0) };
                     });
 
                     strataMetrics.forEach(m => {
@@ -434,10 +554,11 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
                         if (st.allocationMethod === 'Proporcional') {
                             nh = Math.round(nToAllocate * (m.count / totalNResidual));
                         } else if (st.allocationMethod === 'Igualitaria') {
-                            nh = Math.round(nToAllocate / strataKeys.length);
+                            nh = Math.round(nToAllocate / groupMap.size);
                         } else if (st.allocationMethod === 'Óptima (Neyman)') {
+                            // n_h = n * (N_h * sigma_h) / Σ(N_i * sigma_i)
                             const sumNhSh = strataMetrics.reduce((acc, curr) => acc + (curr.count * curr.stdDev), 0);
-                            nh = sumNhSh > 0 ? Math.round(nToAllocate * (m.count * m.stdDev / sumNhSh)) : Math.round(nToAllocate / strataKeys.length);
+                            nh = sumNhSh > 0 ? Math.round(nToAllocate * (m.count * m.stdDev / sumNhSh)) : Math.round(nToAllocate / groupMap.size);
                         }
 
                         if (nh > 0) {
@@ -445,17 +566,23 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
                             const subSample = selectItems(Math.min(nh, groupRows.length), seed, groupRows, () => ({
                                 stratum_label: m.key
                             }));
-                            stratifiedSample = [...stratifiedSample, ...subSample];
+                            stratifiedSampleList = [...stratifiedSampleList, ...subSample];
+                            strataMetadataList.push({
+                                label: m.key,
+                                populationSize: m.count,
+                                populationValue: m.totalValue,
+                                sampleSize: subSample.length
+                            });
                         }
                     });
                 }
             }
 
-            sample = [...certaintyResults, ...stratifiedSample];
+            sample = [...certaintyResults, ...stratifiedSampleList];
             sampleSize = sample.length;
-            methodologyNotes.push(`Estratificación: Aplicada base ${st.basis} con asignación ${manualAllocations ? 'Manual (Auditor)' : st.allocationMethod}.`);
-            if (certaintyResults.length > 0) methodologyNotes.push(`Certeza: ${certaintyResults.length} ítems claves superan el umbral monetario.`);
-
+            resultsMetadata = { strataMetadata: strataMetadataList };
+            methodologyNotes.push(`Estratificación: Aplicada base ${st.basis} con asignación ${st.allocationMethod}.`);
+            if (certaintyResults.length > 0) methodologyNotes.push(`Certeza: ${certaintyResults.length} ítems en capa 100%.`);
             break;
 
         case SamplingMethod.CAV:
@@ -475,16 +602,25 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
                 const variance = vals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / (vals.length - 1);
                 const sigma = Math.sqrt(variance);
 
+                const sigmaDeviation = Math.abs(sigma - cav.sigma) / (cav.sigma || 1);
+                const requiresRecalibration = sigmaDeviation > 0.25;
+
                 pilotMetrics = {
                     type: 'CAV_PILOT',
                     initialSigma: cav.sigma,
                     calibratedSigma: sigma,
                     phase: 'PILOT_ONLY',
                     initialSize: 50,
-                    meanPoblacional: mean
+                    meanPoblacional: mean,
+                    requiresRecalibration,
+                    sigmaDeviation
                 };
 
-                methodologyNotes.push(`Piloto CAV: Sigma calibrado en ${formatMoney(sigma)} (Sigma inicial era ${formatMoney(cav.sigma)}).`);
+                if (requiresRecalibration) {
+                    methodologyNotes.push(`ALTA INCERTIDUMBRE: Desviación Sigma del ${(sigmaDeviation * 100).toFixed(1)}% (Límite 25%). Se requiere ajustar Sigma de diseño.`);
+                } else {
+                    methodologyNotes.push(`Piloto CAV: Sigma calibrado en ${formatMoney(sigma)} (Sigma inicial era ${formatMoney(cav.sigma)}).`);
+                }
             } else {
                 // Cálculo de Tamaño Final usando Sigma (calibrado o manual)
                 const N_CAV = realRows.length > 0 ? realRows.length : 1000;
@@ -586,7 +722,8 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
         upperErrorLimit: 0,
         findings: [],
         methodologyNotes,
-        pilotMetrics
+        pilotMetrics,
+        ...resultsMetadata
     };
 };
 
@@ -595,22 +732,51 @@ export const calculateInference = (results: AuditResults, method: SamplingMethod
     const exceptions = results.sample.filter(i => i.compliance_status === 'EXCEPCION');
     const k = exceptions.length;
 
-    const factors: Record<number, number> = { 0: 3.0, 1: 4.75, 2: 6.30, 3: 7.76, 4: 9.16, 5: 10.52 };
-    const R = factors[k] || (k + 6.5);
-
     if (method === SamplingMethod.Attribute) {
-        return { upperLimit: (R / n) * 100, projectedError: 0 };
+        // Cálculo de UEL basado en Factores de Poisson acumulada
+        const ncKey = results.pilotMetrics ? (results.pilotMetrics.type === 'ATTR_PILOT' ? 95 : 90) : 95;
+        const poissonRow = ncKey === 95 ? POISSON_TABLE[95] : POISSON_TABLE[90];
+        const factorR = poissonRow[k] || (k + 3.0);
+
+        const upperLimit = (factorR / n) * 100;
+        return { upperLimit, projectedError: 0, criticalNumber: k };
     } else if (method === SamplingMethod.CAV && populationCount > 0) {
         // MPU Estimation (Mean Per Unit) for CAV
-        // Projected Error = N * (Sum of errors in sample / n)
         const totalErrorInSample = exceptions.reduce((acc, curr) => acc + (curr.value || 0), 0);
         const projectedError = (totalErrorInSample / n) * populationCount;
-        return { projectedError, upperLimit: (R / n) * 100 };
+
+        // Factor R para el límite superior (Conservador)
+        const factorR = POISSON_TABLE[95][k] || (k + 3.0);
+        return { projectedError, upperLimit: (factorR / n) * 100 };
+    } else if (method === SamplingMethod.Stratified && results.strataMetadata) {
+        // PROYECCIÓN PONDERADA POR ESTRATO (NIA 530 - SIT)
+        let totalProjectedError = 0;
+
+        results.strataMetadata.forEach(meta => {
+            const stratumSample = results.sample.filter(i => (i.stratum_label === meta.label) || (meta.label === 'Certeza' && i.risk_flag === 'TOP_STRATUM'));
+            // Note: Certeza items might be labeled TOP_STRATUM in MUS or similar, but in Stratified they should match literal label
+            const stratumErrors = stratumSample.filter(i => i.compliance_status === 'EXCEPCION');
+
+            const nh = Math.max(meta.sampleSize, stratumSample.length, 1);
+            const Nh = meta.populationSize;
+
+            // Diferencia media por ítem en el estrato
+            const errorInSample = stratumErrors.reduce((acc, curr) => acc + (curr.error_amount || curr.value || 0), 0);
+            const projectedStratumError = (errorInSample / nh) * Nh;
+
+            totalProjectedError += projectedStratumError;
+        });
+
+        // El factor R aquí es más complejo en estratificado, pero usaremos el conservador de Poisson para el límite superior
+        const factorR = POISSON_TABLE[95][k] || (k + 3.0);
+        return { projectedError: totalProjectedError, upperLimit: (factorR / n) * 100 };
     } else {
-        // Ratio Estimation for MUS/Others
-        const sampleValue = results.sample.reduce((acc, curr) => acc + Math.abs(curr.value || 0), 0);
-        const errorValue = exceptions.reduce((acc, curr) => acc + (curr.value || 0), 0);
-        const projectedError = sampleValue > 0 ? (errorValue / sampleValue) * totalValue : 0;
-        return { projectedError, upperLimit: (R / n) * 100 };
+        // Ratio Estimation for MUS/Others (NIA 530)
+        const sampleValue = results.sample.reduce((acc, curr) => acc + Math.abs(curr.value || 0), 0) || 1;
+        const errorValue = exceptions.reduce((acc, curr) => acc + (curr.error_amount || curr.value || 0), 0);
+        const projectedError = (errorValue / sampleValue) * totalValue;
+
+        const factorR = POISSON_TABLE[95][k] || (k + 3.0);
+        return { projectedError, upperLimit: (factorR / n) * 100 };
     }
 };

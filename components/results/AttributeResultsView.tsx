@@ -30,6 +30,8 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
     const threshold = params.ET;
     const isAcceptable = inference.upperLimit <= threshold;
     const errorsFound = currentResults.sample.filter(i => i.compliance_status === 'EXCEPCION').length;
+    const criticalNumber = inference.criticalNumber ?? 0;
+    const isControlEffective = errorsFound <= criticalNumber;
 
     // Lógica para ampliación secuencial Stop-or-Go
     const canExpand = params.useSequential && errorsFound > 0 && currentResults.sampleSize < 100;
@@ -163,14 +165,31 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
                 <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:rotate-12 transition-transform">
                     <i className="fas fa-microscope text-indigo-500"></i>
                 </div>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-4">Tasa de Desviación (UEL)</span>
-                <h3
-                    onClick={() => setShowUelModal(true)}
-                    className={`text-5xl font-black mb-6 tracking-tighter cursor-pointer hover:scale-105 transition-transform ${isAcceptable ? 'text-emerald-500' : 'text-rose-600'}`}
-                >
-                    {inference.upperLimit.toFixed(2)}%
-                </h3>
-                <div className="h-[140px] w-full mt-6 bg-slate-50/50 rounded-3xl p-4 border border-slate-50">
+                <div className="flex items-center gap-2 mb-4">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Veredicto Técnico</span>
+                    <span className="px-2 py-0.5 bg-slate-100 text-[8px] font-black text-slate-500 rounded-md border border-slate-200">DETERMINISTA</span>
+                </div>
+
+                <div className={`text-2xl font-black mb-2 tracking-tighter ${isControlEffective ? 'text-emerald-500' : 'text-rose-600'}`}>
+                    {isControlEffective ? 'CONTROL EFECTIVO' : 'CONTROL NO EFECTIVO'}
+                    <i className={`fas ${isControlEffective ? 'fa-check-circle' : 'fa-times-circle'} ml-2 text-lg`}></i>
+                </div>
+
+                <p className="text-[9px] font-medium text-slate-400 mb-6 italic">
+                    {isControlEffective
+                        ? `Basado en NIA 530: Hallazgos (${errorsFound}) ≤ Número Crítico (${criticalNumber}).`
+                        : `Basado en NIA 530: Hallazgos (${errorsFound}) > Número Crítico (${criticalNumber}).`}
+                </p>
+
+                <div className="flex justify-between items-end mb-6">
+                    <div>
+                        <span className="text-[8px] font-black text-slate-400 uppercase block">UEL Calculado</span>
+                        <h3 className={`text-3xl font-black leading-none ${isAcceptable ? 'text-emerald-500' : 'text-rose-600'}`}>
+                            {inference.upperLimit.toFixed(2)}%
+                        </h3>
+                    </div>
+                </div>
+                <div className="h-[120px] w-full bg-slate-50/50 rounded-3xl p-4 border border-slate-50">
                     <RiskChart
                         upperErrorLimit={inference.upperLimit}
                         tolerableError={threshold}
@@ -204,22 +223,15 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
                 <div className="text-6xl font-black tracking-tighter mb-2">
                     {currentResults.sampleSize}
                 </div>
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6">Items Totales</p>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6">Unidades de Muestreo</p>
 
                 <div className="flex items-center gap-3 pt-6 border-t border-slate-800">
-                    <span className="text-[9px] font-mono text-cyan-500">Formula:</span>
-                    <span className="text-[9px] font-mono text-slate-400">n = (R×100)/(ET-PE)</span>
+                    <span className="text-[9px] font-mono text-cyan-500">Factor Z:</span>
+                    <span className="text-[9px] font-mono text-slate-400">{params.NC >= 99 ? '2.576' : params.NC >= 95 ? '1.96' : '1.645'}</span>
                 </div>
             </div>
 
-            <button
-                onClick={() => saveToDb(currentResults, false)}
-                disabled={isSaving}
-                className="w-full py-6 bg-slate-800 text-white rounded-[2rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-lg hover:bg-slate-700 transition-all flex items-center justify-center gap-3"
-            >
-                {isSaving ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-save"></i>}
-                Guardar Trabajo
-            </button>
+            <p className="text-[10px] font-black text-slate-300 uppercase text-center tracking-[0.2em] mt-6 italic">Ver Análisis de Inferencia</p>
         </div>
     );
 
@@ -319,11 +331,24 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
                                             <span className="block text-[9px] font-medium text-slate-400 mt-0.5">{phaseLabel}</span>
                                         </td>
                                         <td className="px-10 py-6">
-                                            <div className="flex items-center gap-2">
-                                                <div className={`h-2 w-12 rounded-full overflow-hidden bg-slate-100`}>
-                                                    <div className={`h-full ${riskScore > 80 ? 'bg-rose-500' : riskScore > 50 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${riskScore}%` }}></div>
+                                            <div className="group relative">
+                                                <div className="flex items-center gap-2">
+                                                    <div className={`h-2 w-12 rounded-full overflow-hidden bg-slate-100`}>
+                                                        <div className={`h-full ${riskScore > 80 ? 'bg-rose-500' : riskScore > 50 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${riskScore}%` }}></div>
+                                                    </div>
+                                                    <span className="text-[9px] font-black text-slate-400">{riskScore} pts</span>
                                                 </div>
-                                                <span className="text-[9px] font-black text-slate-400">{riskScore} pts</span>
+                                                {item.risk_factors && item.risk_factors.length > 0 && (
+                                                    <div className="absolute left-0 top-full mt-2 hidden group-hover:block z-50 bg-slate-900 text-white p-3 rounded-xl shadow-2xl min-w-[200px] border border-slate-700">
+                                                        <p className="text-[8px] font-black text-slate-500 uppercase mb-2 border-b border-slate-800 pb-1">Evidencia Técnica (Determinista)</p>
+                                                        {item.risk_factors.map((f, fi) => (
+                                                            <div key={fi} className="text-[9px] mb-1 flex items-start gap-2">
+                                                                <i className="fas fa-cog text-cyan-400 mt-1"></i>
+                                                                <span>{f}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
                                         </td>
                                         <td className="px-10 py-6 text-center">
@@ -380,6 +405,8 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
         <>
             <SharedResultsLayout
                 appState={appState} role={role} onBack={onBack} title="Resultados: Atributos"
+                onSaveManual={() => saveToDb(currentResults, false)}
+                isSaving={isSaving}
                 sidebarContent={sidebar} mainContent={main} certificationContent={<div className="mt-10 p-10 bg-[#0f172a] rounded-[3rem] text-center text-white text-[10px] font-black uppercase tracking-[0.4em] border border-slate-800">Uso Exclusivo Auditoría / Control de Calidad</div>}
             />
 
@@ -445,11 +472,12 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
 
                     <div className="bg-slate-50 p-8 rounded-[2rem] border border-slate-200">
                         <h4 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-6">
-                            {wasExpanded ? "Fórmula Definitiva (Recálculo)" : "Fórmula Estándar (Atributos)"}
+                            Lógica de Proporciones NIA 530
                         </h4>
                         <div className="flex justify-center mb-8">
-                            <div className="bg-white px-8 py-4 rounded-2xl shadow-sm border border-slate-100 font-mono text-lg text-slate-700">
-                                n = (Factor R × 100) / (ET - PE)
+                            <div className="bg-white px-8 py-4 rounded-2xl shadow-sm border border-slate-100 font-mono text-center text-slate-700">
+                                <div className="text-xs mb-1 font-bold">n₀ = (Z² × p × q) / E²</div>
+                                <div className="text-[9px] opacity-50">Ajuste FPCF: n = (n₀ × N) / (n₀ + N)</div>
                             </div>
                         </div>
 

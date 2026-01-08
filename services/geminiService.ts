@@ -14,15 +14,26 @@ export const getGeminiRecommendation = async (stats: DescriptiveStats, analysis:
     // Initialize with safe fallback if key is missing to avoid immediate crash before call
     const ai = new GoogleGenAI({ apiKey });
 
-    const prompt = `Como experto en auditoría NIA 530, analiza estos datos y recomienda un método de muestreo.
-    Estadísticas: Suma=${stats.sum}, Promedio=${stats.avg}, CV=${stats.cv}.
-    Análisis Forense: Benford Issues=${JSON.stringify(analysis.benford)}, Outliers=${analysis.outliersCount}, Negativos=${analysis.negativesCount}.`;
+    const prompt = `Actúa como un Auditor Senior Conservador experto en NIA 530 y Prevención de Fraude. 
+    Tu objetivo es analizar estadísticas de una población y sugerir el método de muestreo más SEGURO y EFICIENTE.
+    
+    ESTRICTAMENTE: 
+    1. No inventes datos que no estén presentes en las estadísticas proporcionadas.
+    2. Si el Coeficiente de Variación (CV) es alto (> 0.5), prioriza MUESTREO ESTRATIFICADO o MUS.
+    3. Si hay muchos registros negativos, menciona la necesidad de segregarlos.
+    4. Tu razonamiento debe ser técnico, neutral y basado exclusivamente en los números.
+    5. Prohibido usar terminología ambigua como "parece que" o "podría ser". Usa "La variabilidad indica" o "El perfil forense demanda".
+
+    DATOS DE ENTRADA:
+    - Estadísticas Descriptivas: Suma=$${stats.sum.toLocaleString()}, Promedio=$${stats.avg.toLocaleString()}, CV=${stats.cv.toFixed(4)}.
+    - Análisis de Riesgo Forense: 
+        * Fallos Benford: ${JSON.stringify(analysis.benford)}
+        * Outliers Detectados: ${analysis.outliersCount}
+        * Registros Negativos: ${analysis.negativesCount}
+        * Zeros: ${analysis.zerosCount}`;
 
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-2.0-flash-exp", // Updated model to a likely available one or keep user's "gemini-3-pro-preview" if valid. Keeping user's string but noting it might need update.
-            // valid models often: gemini-1.5-pro, gemini-1.5-flash. "gemini-3-pro-preview" might be hypothetical or very new.
-            // I will stick to the user's string "gemini-3-pro-preview" as requested, but add a comment.
             model: "gemini-2.0-flash-exp",
             contents: {
                 role: "user",

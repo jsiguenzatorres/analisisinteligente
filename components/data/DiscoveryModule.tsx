@@ -23,6 +23,7 @@ const DiscoveryModule: React.FC<Props> = (props) => {
     const [loadingTask, setLoadingTask] = useState<string>('Iniciando motores...');
     const [currentProgress, setCurrentProgress] = useState(0); // Nuevo estado para el progreso
     const [helpContent, setHelpContent] = useState<{ title: string; content: React.ReactNode } | null>(null);
+    const [certified, setCertified] = useState(false);
 
     const tasks = [
         "Escaneando semántica de cabeceras...",
@@ -86,7 +87,7 @@ const DiscoveryModule: React.FC<Props> = (props) => {
                 const sampleList = rows.map(function (r) { return r.raw_json; });
                 setHeaders(headList);
 
-                setLoadingTask(isDeep ? "Analizando Patrones de Datos con G3 Pro..." : "Mapeando Cabeceras con Gemini Lite...");
+                setLoadingTask(isDeep ? "Analizando Patrones de Datos con el Motor de Análisis Inteligente..." : "Mapeando Cabeceras con el Motor de Análisis Inteligente...");
 
                 const analysis = await scanHeadersAndSuggestTests(headList, isDeep, sampleList);
 
@@ -145,7 +146,14 @@ const DiscoveryModule: React.FC<Props> = (props) => {
         timestamp: 'fa-clock'
     };
 
-    const baseKeys: (keyof ColumnMapping)[] = ['uniqueId', 'monetaryValue', 'category', 'subcategory', 'date', 'user', 'vendor', 'timestamp'];
+    // Las llaves base ahora son dinámicas. UniqueId siempre es obligatorio.
+    // monetaryValue solo si las pruebas activas lo piden.
+    const baseKeys: (keyof ColumnMapping)[] = ['uniqueId'];
+    if (Object.keys(columnRequirements).includes('monetaryValue')) {
+        baseKeys.push('monetaryValue');
+    }
+
+    // Solo exigimos lo que las pruebas activas requieren + uniqueId
     const requiredMappingKeys = Array.from(new Set(baseKeys.concat(Object.keys(columnRequirements) as (keyof ColumnMapping)[]))) as (keyof ColumnMapping)[];
 
     const getHelpContent = (key: string) => {
@@ -172,7 +180,7 @@ const DiscoveryModule: React.FC<Props> = (props) => {
                     <i className="fas fa-brain text-white text-3xl"></i>
                 </div>
                 <h2 className="text-4xl font-black text-slate-900 tracking-tighter uppercase">Inteligencia Forense</h2>
-                <p className="text-slate-500 font-medium mt-2">¿Cómo deseas que Gemini analice tu base de datos?</p>
+                <p className="text-slate-500 font-medium mt-2">¿Cómo deseas que el Motor de Análisis Inteligente analice tu base de datos?</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -195,7 +203,7 @@ const DiscoveryModule: React.FC<Props> = (props) => {
                         <i className="fas fa-dna"></i>
                     </div>
                     <h3 className="text-xl font-black text-white uppercase mb-2">Escaneo Forense</h3>
-                    <p className="text-xs text-cyan-400 font-black uppercase tracking-widest">Análisis Profundo con Gemini 3 Pro.</p>
+                    <p className="text-xs text-cyan-400 font-black uppercase tracking-widest">Análisis Profundo con el Motor de Análisis Inteligente.</p>
                 </button>
             </div>
         </div>
@@ -208,7 +216,7 @@ const DiscoveryModule: React.FC<Props> = (props) => {
                     <i className="fas fa-microchip text-5xl animate-spin-slow"></i>
                 </div>
                 <h3 className="text-2xl font-black text-slate-800 uppercase tracking-tight mb-4">{loadingTask}</h3>
-                <p className="text-slate-400 mb-12 text-xs font-bold uppercase tracking-widest italic">AAMA v6.0 / Gemini Engine</p>
+                <p className="text-slate-400 mb-12 text-xs font-bold uppercase tracking-widest italic">AAMA v6.0 / Motor de Análisis Inteligente</p>
 
                 <div className="w-full h-5 bg-slate-100 rounded-full overflow-hidden p-1 shadow-inner border border-slate-200">
                     <div
@@ -284,7 +292,7 @@ const DiscoveryModule: React.FC<Props> = (props) => {
                 <div className="bg-white rounded-[3rem] p-12 border border-slate-100 shadow-sm space-y-8">
                     <div className="grid grid-cols-1 gap-6">
                         {requiredMappingKeys.map(function (key) {
-                            const isCore = key === 'uniqueId' || key === 'monetaryValue';
+                            const isCore = key === 'uniqueId';
                             const reqs = columnRequirements[key] || [];
                             const isMapped = !!(mapping as any)[key];
                             const icon = keyIcons[key] || 'fa-database';
@@ -365,9 +373,21 @@ const DiscoveryModule: React.FC<Props> = (props) => {
                             </div>
                         )}
 
+                        <div className="flex items-start gap-4 mb-10 p-6 bg-white/5 rounded-[2rem] border border-white/10 cursor-pointer group hover:bg-white/[0.08] transition-all" onClick={() => setCertified(!certified)}>
+                            <div className={`mt-0.5 h-6 w-6 rounded-lg border-2 flex items-center justify-center transition-all ${certified ? 'bg-cyan-500 border-cyan-500' : 'border-white/20 group-hover:border-white/40'}`}>
+                                {certified && <i className="fas fa-check text-[10px] text-white"></i>}
+                            </div>
+                            <div className="flex-1">
+                                <p className="text-[10px] font-black uppercase tracking-[0.1em] text-white">Certificar Mapeo de Datos</p>
+                                <p className="text-[9px] font-medium text-indigo-200/60 mt-1 leading-relaxed">
+                                    Confirmo que las columnas vinculadas son correctas. Entiendo que un error aquí anula la validez técnica de la auditoría.
+                                </p>
+                            </div>
+                        </div>
+
                         <button
                             onClick={function () { onComplete(mapping, activeTests.map(function (t) { return t.id; })); }}
-                            disabled={!isMappingReady}
+                            disabled={!isMappingReady || !certified}
                             className="w-full py-7 bg-white text-indigo-900 rounded-3xl font-black text-sm uppercase tracking-[0.3em] shadow-xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-20 disabled:scale-100 disabled:cursor-not-allowed"
                         >
                             Confirmar Escaneo Maestro

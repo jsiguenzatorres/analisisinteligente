@@ -14,7 +14,7 @@ interface Props {
 }
 
 const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) => {
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const [populations, setPopulations] = useState<AuditPopulation[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -22,30 +22,38 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
     const { addToast } = useToast();
 
     useEffect(() => {
+        if (authLoading) return; // Esperar a que Auth inicialice
+
         if (user) {
             fetchPopulations();
         } else {
-            // Si no hay usuario, no cargamos nada o esperamos
-            // (El AuthContext manejará la redirección/login si fuera necesario, 
-            // pero aquí evitamos el fetch fallido)
+            // Si no hay usuario y ya terminó de cargar Auth, terminamos carga local
+            setLoading(false);
         }
-    }, [user]);
+    }, [user, authLoading]);
 
     const fetchPopulations = async () => {
         setLoading(true);
         setError(null);
-        const { data, error } = await supabase
-            .from('audit_populations')
-            .select('*')
-            .order('created_at', { ascending: false });
+        try {
+            const { data, error } = await supabase
+                .from('audit_populations')
+                .select('*')
+                .order('created_at', { ascending: false });
 
-        if (error) {
-            console.error('Error fetching populations:', error);
-            setError('No se pudieron cargar las poblaciones. Verifique la conexión con la base de datos.');
-        } else {
-            setPopulations(data as AuditPopulation[]);
+            if (error) {
+                console.error('Error fetching populations:', error);
+                // Si el error es de conexión o RLS, no mostramos nada crítico, solo vacío o error
+                setError('No se pudieron cargar los proyectos. Intente recargar.');
+            } else {
+                setPopulations(data as AuditPopulation[]);
+            }
+        } catch (err) {
+            console.error("Crash fetching populations:", err);
+            setError('Error de conexión al obtener proyectos.');
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     const handleDelete = async () => {

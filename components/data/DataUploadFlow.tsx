@@ -187,27 +187,48 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
 
             addLog(`📦 Enviando ${batches.length} lotes al Backend...`);
 
-            // Enviamos lotes usando Promise.all para velocidad (El backend manejará la concurrencia)
+            // Enviamos lotes SECUENCIALMENTE para evitar saturar la red/firewall y detectar errores específicos
             let completedBatches = 0;
 
-            const uploadPromises = batches.map(async (batch, idx) => {
-                const res = await fetch('/api/insert_batch', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ rows: batch })
-                });
+            for (const [idx, batch] of batches.entries()) {
+                addLog(`⏳ Subiendo lote ${idx + 1} de ${batches.length}...`);
 
-                if (!res.ok) {
-                    const err = await res.text();
-                    console.error(`Error lote ${idx}:`, err);
-                    addLog(`⚠️ Fallo Lote ${idx + 1}`);
-                } else {
+                try {
+                    const res = await fetch('/api/insert_batch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rows: batch })
+                    });
+
+                    if (!res.ok) {
+                        const errText = await res.text();
+                        console.error(`Error Batch ${idx + 1}:`, errText);
+
+                        // Si falla un lote, intentamos borrar la población para no dejar basura
+                        // (Opcional: se podría dejar para depuración, pero mejor limpiar)
+                        try {
+                            await supabase.from('audit_populations').delete().eq('id', populationId);
+                            addLog("❌ Error en carga. Se eliminó el registro parcial.");
+                        } catch (delErr) {
+                            console.error("Error cleanup:", delErr);
+                        }
+
+                        throw new Error(`Fallo en lote ${idx + 1}: ${errText}`);
+                    }
+
                     completedBatches++;
-                    setUploadProgress(Math.round((completedBatches / batches.length) * 100));
-                }
-            });
+                    const progress = Math.round(((idx + 1) / batches.length) * 100);
+                    setUploadProgress(progress);
 
-            await Promise.all(uploadPromises);
+                } catch (batchErr: any) {
+                    throw new Error(batchErr.message || "Error de red al subir lote");
+                }
+            }
+
+            // Validación final de conteo
+            if (completedBatches !== batches.length) {
+                throw new Error("No se completaron todos los lotes.");
+            }
 
             addLog("✅ Carga Completada (Backend Proxy).");
 

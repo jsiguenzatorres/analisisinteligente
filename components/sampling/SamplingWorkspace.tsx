@@ -53,15 +53,14 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
         setLoading(true);
 
         try {
-            const { count, error } = await supabase
-                .from('audit_historical_samples')
-                .select('*', { count: 'exact', head: true })
-                .eq('population_id', appState.selectedPopulation.id)
-                .eq('is_current', true);
+            // Use Proxy to check history (Bypass Firewall)
+            const res = await fetch(`/api/get_sample_history?population_id=${appState.selectedPopulation.id}`);
+            if (!res.ok) throw new Error('Failed to check history');
 
-            if (error) throw error;
+            const { history } = await res.json();
+            const hasCurrent = history && history.some((h: any) => h.is_current);
 
-            if (count && count > 0) {
+            if (hasCurrent) {
                 setShowConfirmModal(false);
                 setShowReplaceWarning(true);
                 setLoading(false);

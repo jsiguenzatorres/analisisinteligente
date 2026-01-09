@@ -16,14 +16,18 @@ const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onB
     useEffect(() => {
         const fetchHistory = async () => {
             setLoading(true);
-            const { data, error } = await supabase
-                .from('audit_historical_samples')
-                .select('*')
-                .eq('population_id', populationId)
-                .order('created_at', { ascending: false });
+            try {
+                // Use Proxy to bypass firewall
+                const res = await fetch(`/api/get_sample_history?population_id=${populationId}`);
+                if (!res.ok) throw new Error('Failed to fetch history');
 
-            if (!error && data) setHistory(data as HistoricalSample[]);
-            setLoading(false);
+                const { history } = await res.json();
+                if (history) setHistory(history as HistoricalSample[]);
+            } catch (err) {
+                console.error("Error fetching history:", err);
+            } finally {
+                setLoading(false);
+            }
         };
         fetchHistory();
     }, [populationId]);
@@ -46,8 +50,8 @@ const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onB
                     <h2 className="text-3xl font-black text-slate-800 tracking-tight">Archivo Histórico</h2>
                     <p className="text-slate-500 font-medium">Registro inmutable de papeles de trabajo generados.</p>
                 </div>
-                <button 
-                    onClick={onBack} 
+                <button
+                    onClick={onBack}
                     className="px-6 py-3 bg-white border border-slate-300 rounded-xl text-xs font-black text-slate-700 uppercase tracking-widest hover:text-blue-800 hover:border-blue-500 hover:shadow-xl transition-all transform hover:-translate-y-1 group flex items-center shadow-md"
                 >
                     <div className="bg-slate-100 group-hover:bg-blue-50 p-2 rounded-lg mr-3 transition-colors">
@@ -71,7 +75,7 @@ const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onB
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {history.map((sample) => (
-                        <div 
+                        <div
                             key={sample.id}
                             onClick={() => onLoadSample(sample)}
                             className={`bg-white rounded-3xl border p-7 shadow-sm hover:shadow-2xl transition-all cursor-pointer group relative overflow-hidden ${sample.is_current ? 'border-emerald-500 ring-4 ring-emerald-50' : 'border-slate-200'}`}
@@ -81,11 +85,11 @@ const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onB
                                     Versión Definitiva
                                 </div>
                             )}
-                            
+
                             <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
                                 <i className={`fas ${sample.is_current ? 'fa-check-double' : 'fa-history'} text-6xl`}></i>
                             </div>
-                            
+
                             <div className="flex justify-between items-start mb-5">
                                 <div className="flex flex-col">
                                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
@@ -97,11 +101,11 @@ const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onB
                                     <i className="fas fa-eye text-lg"></i>
                                 </div>
                             </div>
-                            
+
                             <h4 className="text-xl font-black text-slate-800 line-clamp-1 mb-2 group-hover:text-blue-900 transition-colors">
                                 {sample.objective || "Validación General"}
                             </h4>
-                            
+
                             <div className="grid grid-cols-2 gap-6 mt-6 pt-6 border-t border-slate-50">
                                 <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
                                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Items (n)</p>

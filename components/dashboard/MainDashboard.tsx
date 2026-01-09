@@ -73,20 +73,40 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ userName, onNavigate, onL
             }, 12000);
 
             try {
-                // FETCH VIA PROXY (Bypass Firewall)
-                const headers = { 'Content-Type': 'application/json' };
+                let popData = [];
+                let resultsData = [];
 
-                // 1. Get Populations
-                const popRes = await fetch('/api/sampling_proxy?action=get_populations');
-                if (!popRes.ok) throw new Error('Error cargando proyectos (Proxy)');
-                const { populations: popData } = await popRes.json();
+                // ATTEMPT 1: PROXY (Preferred)
+                try {
+                    const popRes = await fetch('/api/sampling_proxy?action=get_populations');
+                    if (!popRes.ok) throw new Error(`Proxy Populations Failed (${popRes.status})`);
+                    const { populations } = await popRes.json();
+                    popData = populations || [];
 
-                // 2. Get Results Stats
-                const resultsRes = await fetch('/api/sampling_proxy?action=get_all_results');
-                if (!resultsRes.ok) throw new Error('Error cargando estadísticas (Proxy)');
-                const { results: resultsData } = await resultsRes.json();
+                    const resultsRes = await fetch('/api/sampling_proxy?action=get_all_results');
+                    if (!resultsRes.ok) throw new Error(`Proxy Results Failed (${resultsRes.status})`);
+                    const { results } = await resultsRes.json();
+                    resultsData = results || [];
 
-                if (isMounted && popData) {
+                } catch (proxyError) {
+                    console.warn("⚠️ Proxy Fail/Localhost detected. Switching to Direct Supabase...", proxyError);
+
+                    // ATTEMPT 2: DIRECT SUPABASE (Fallback)
+                    const { data: directPop, error: popErr } = await supabase
+                        .from('audit_populations')
+                        .select('*')
+                        .order('created_at', { ascending: false });
+                    if (popErr) throw popErr;
+                    popData = directPop || [];
+
+                    const { data: directRes, error: resErr } = await supabase
+                        .from('audit_results')
+                        .select('results_json, population_id');
+                    if (resErr) throw resErr;
+                    resultsData = directRes || [];
+                }
+
+                if (isMounted) {
                     setAllProjects(popData);
                     setRecentProjects(popData.slice(0, 5));
 

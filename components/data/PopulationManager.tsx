@@ -36,21 +36,15 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
         setLoading(true);
         setError(null);
         try {
-            const { data, error } = await supabase
-                .from('audit_populations')
-                .select('*')
-                .order('created_at', { ascending: false });
+            // Use Proxy to bypass Firewall
+            const res = await fetch('/api/get_populations');
+            if (!res.ok) throw new Error('Error fetching populations via proxy');
 
-            if (error) {
-                console.error('Error fetching populations:', error);
-                // Si el error es de conexión o RLS, no mostramos nada crítico, solo vacío o error
-                setError('No se pudieron cargar los proyectos. Intente recargar.');
-            } else {
-                setPopulations(data as AuditPopulation[]);
-            }
+            const { populations: data } = await res.json();
+            setPopulations(data || []);
         } catch (err) {
             console.error("Crash fetching populations:", err);
-            setError('Error de conexión al obtener proyectos.');
+            setError('Error de conexión al obtener proyectos (Proxy).');
         } finally {
             setLoading(false);
         }
@@ -62,17 +56,16 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
         setDeleteConfirm(null);
 
         try {
-            // Nota: Se asume que la base de datos tiene "ON DELETE CASCADE" en las filas hijas (audit_data_rows).
-            // Si no, habría que borrar las filas primero.
-            const { error } = await supabase
-                .from('audit_populations')
-                .delete()
-                .eq('id', id);
-
-            if (error) throw error;
+            // Use Proxy to bypass Firewall
+            const res = await fetch(`/api/delete_population?id=${id}`, { method: 'DELETE' });
+            if (!res.ok) {
+                const errData = await res.json();
+                throw new Error(errData.error || 'Error deleting via proxy');
+            }
 
             // Actualizar estado local eliminando el item
             setPopulations(prev => prev.filter(p => p.id !== id));
+            addToast("Población eliminada correctamente", 'success');
 
         } catch (err: any) {
             console.error("Error deleting:", err);

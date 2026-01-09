@@ -286,5 +286,15 @@ export const ASSISTANT_CONTENT = {
                 </RichInfoCard>
             </div>
         )
+    },
+    semilla: {
+        title: 'Semilla Estadística (Seed)',
+        content: (
+            <div className="space-y-4">
+                <RichInfoCard type="definition" title="Reproductibilidad">
+                    Valor inicial para el generador de números pseudoaleatorios. Garantiza que la selección de la muestra pueda ser replicada idénticamente en el futuro.
+                </RichInfoCard>
+            </div>
+        )
     }
 };

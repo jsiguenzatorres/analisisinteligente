@@ -10,7 +10,7 @@ import ValidationWorkspace from './components/data/ValidationWorkspace';
 import DiscoveryModule from './components/data/DiscoveryModule';
 import RiskProfiler from './components/risk/RiskProfiler';
 import Stepper from './components/layout/Stepper';
-import { ToastProvider } from './components/ui/ToastContext';
+import { ToastProvider, useToast } from './components/ui/ToastContext';
 import { supabase } from './services/supabaseClient';
 
 import Sidebar from './components/layout/Sidebar';
@@ -23,6 +23,7 @@ import AdminUserManagementView from './components/admin/AdminUserManagementView'
 
 const AuthenticatedApp: React.FC = () => {
     const { user, profile, loading, signOut } = useAuth();
+    const { addToast } = useToast();
     const [view, setView] = useState<AppView>('main_dashboard');
     const [activePopulation, setActivePopulation] = useState<AuditPopulation | null>(null);
     const [validationPopulationId, setValidationPopulationId] = useState<string | null>(null);
@@ -149,26 +150,37 @@ const AuthenticatedApp: React.FC = () => {
         setView('discovery_analysis');
     };
 
+
+
     const handleDiscoveryComplete = async (mapping: ColumnMapping, activeTests: string[]) => {
         if (!validationPopulationId) return;
 
-        const { data, error } = await supabase
-            .from('audit_populations')
-            .update({
-                column_mapping: mapping,
-                advanced_analysis: { forensicDiscovery: activeTests }
-            })
-            .eq('id', validationPopulationId)
-            .select()
-            .single();
+        try {
+            // Use Proxy to bypass Firewall
+            const res = await fetch('/api/update_mapping', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: validationPopulationId,
+                    column_mapping: mapping,
+                    advanced_analysis: { forensicDiscovery: activeTests }
+                })
+            });
 
-        if (error) {
+            if (!res.ok) {
+                const errData = await res.json();
+                throw new Error(errData.error || 'Proxy update failed');
+            }
+
+            const data = await res.json();
+            setActivePopulation(data as AuditPopulation);
+            setView('risk_profiling');
+            addToast("Mapeo confirmado correctamente", 'success');
+
+        } catch (error: any) {
             console.error("Error saving discovery results:", error);
-            return;
+            addToast("Error al confirmar mapeo (Firewall Bypass): " + error.message, 'error');
         }
-
-        setActivePopulation(data as AuditPopulation);
-        setView('risk_profiling');
     };
 
     const handleRiskComplete = (updatedPop: AuditPopulation) => {

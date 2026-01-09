@@ -170,8 +170,8 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
             addLog(`⏩ Iniciando carga de ${data.length} filas vía Backend...`);
 
             // 2. Preparar y subir datos por lotes (Batching) - BACKEND PROXY
-            // Reducimos lote a 50 para no estresar el firewall
-            const BATCH_SIZE = 50;
+            // Reducimos lote a 20 para evasión de firewall (Payload size & Timeouts)
+            const BATCH_SIZE = 20;
             const batches = [];
 
             for (let i = 0; i < data.length; i += BATCH_SIZE) {
@@ -192,10 +192,10 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
             let completedBatches = 0;
 
             for (const [idx, batch] of batches.entries()) {
-                addLog(`⏳ Subiendo lote ${idx + 1} de ${batches.length}...`);
+                addLog(`⏳ Subiendo lote ${idx + 1} de ${batches.length} (chunks)...`);
 
                 try {
-                    const res = await fetch('/api/insert_batch', {
+                    const res = await fetch('/api/sync_chunk', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ rows: batch })

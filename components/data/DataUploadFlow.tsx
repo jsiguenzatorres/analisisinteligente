@@ -69,6 +69,8 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
     const validateMapping = () => {
         if (!mapping.uniqueId) return "Debe seleccionar una columna para el ID Único.";
         if (hasMonetaryCols && !mapping.monetaryValue) return "Debe seleccionar una columna para el Valor Monetario.";
+        // NUEVO: Si no hay dinero, OBLIGAR a elegir Categoría para tener qué contar
+        if (!hasMonetaryCols && !mapping.category) return "Para cargas sin montos, DEBE seleccionar una columna de Categoría para generar estadísticas.";
         return null;
     };
 

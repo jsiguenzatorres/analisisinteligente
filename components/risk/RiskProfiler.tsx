@@ -38,13 +38,26 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
             setAnalysisData(advancedAnalysis); // Store for later use
 
             const mapping = population.column_mapping;
-            const plotData = updatedRows.map(r => {
-                const mValue = parseFloat(String(r.raw_json?.[mapping.monetaryValue || '']).replace(/[^0-9.-]+/g, "")) || 0;
+            const plotData = updatedRows.map((r, index) => {
+                // Safeguard against missing column mapping or null values
+                const rawVal = r.raw_json?.[mapping.monetaryValue || ''];
+                let mValue = 0;
+
+                if (rawVal !== undefined && rawVal !== null) {
+                    const strVal = String(rawVal).replace(/[^0-9.-]+/g, "");
+                    mValue = parseFloat(strVal);
+                    if (isNaN(mValue)) mValue = 0;
+                }
+
+                // Prevent log(0) issues or infinities
+                const zVal = mValue > 0 ? Math.log10(mValue + 1) * 10 : 10;
+
                 return {
-                    x: r.alert_count,
-                    y: r.risk_score,
-                    z: Math.log10(Math.abs(mValue) + 1) * 10,
-                    name: r.unique_id_col || 'ID',
+                    id: r.id || `row-${index}`, // Ensure unique ID for Recharts keys
+                    x: r.alert_count ?? 0,
+                    y: r.risk_score ?? 0,
+                    z: zVal,
+                    name: r.unique_id_col || `ID-${index}`,
                     value: mValue
                 };
             }).filter(d => d.y > 0);

@@ -74,17 +74,16 @@ const DiscoveryModule: React.FC<Props> = (props) => {
         setLoadingTask("Iniciando Escaneo Forense...");
 
         try {
-            const response = await supabase
-                .from('audit_data_rows')
-                .select('raw_json')
-                .eq('population_id', populationId)
-                .limit(3);
+            // FIREWALL EVASION: Use Vercel Proxy
+            const res = await fetch(`/api/get_validation_data?id=${populationId}`);
+            if (!res.ok) throw new Error("Error fetching discovery data via Proxy");
 
-            const rows = response.data;
+            const data = await res.json();
+            const rows = data.rows ? data.rows.slice(0, 5) : [];
 
             if (rows && rows.length > 0) {
                 const headList = Object.keys(rows[0].raw_json || {});
-                const sampleList = rows.map(function (r) { return r.raw_json; });
+                const sampleList = rows.map((r: any) => r.raw_json);
                 setHeaders(headList);
 
                 setLoadingTask(isDeep ? "Analizando Patrones de Datos con el Motor de Análisis Inteligente..." : "Mapeando Cabeceras con el Motor de Análisis Inteligente...");
@@ -102,7 +101,6 @@ const DiscoveryModule: React.FC<Props> = (props) => {
             }
         } catch (e: any) {
             console.error("Discovery Error:", e);
-            // alert("Error en el descubrimiento: " + e.message); // Commented out to favor Toast if available later, or kept as user provided
             setStage('depth_selector');
             setCurrentProgress(0); // Reset progress on error
         }

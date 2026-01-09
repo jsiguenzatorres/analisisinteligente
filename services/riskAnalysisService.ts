@@ -159,11 +159,21 @@ export const performRiskProfiling = (rows: any[], pop: AuditPopulation): { updat
 
     updatedRows.forEach(r => {
         const raw = r.raw_json || {};
-        const valStr = String(raw[monetaryValue || '']);
-        const m = parseFloat(valStr.replace(/[^0-9.-]+/g, ""));
+        // Robust parsing: Handle possible numeric values directly or formatted strings
+        let valRaw = raw[monetaryValue || ''];
+        let m = 0;
+
+        if (typeof valRaw === 'number') {
+            m = valRaw;
+        } else {
+            const valStr = String(valRaw || '');
+            // Remove everything except numbers, dots and minus sign
+            m = parseFloat(valStr.replace(/[^0-9.-]+/g, ""));
+        }
 
         if (isNaN(m)) {
             errorDataCount++;
+            m = 0; // Treat as 0 for safeguard in other stats if needed, or skip
         } else {
             correctDataCount++;
             absSum += Math.abs(m);

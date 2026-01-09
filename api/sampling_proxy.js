@@ -64,6 +64,22 @@ export default async function handler(req, res) {
                 if (error) throw error;
                 return res.status(200).json({ rows: data });
 
+            } else if (action === 'get_smart_sample') {
+                // SERVER-SIDE SAMPLING (Risk Based)
+                // Returns top N riskiest items directly from DB to avoid browser processing of 20k rows.
+                const { population_id, sample_size } = req.query;
+                const limit = parseInt(sample_size) || 30;
+
+                const { data, error } = await supabase
+                    .from('audit_data_rows')
+                    .select('unique_id_col, monetary_value_col, risk_score, risk_factors, raw_json')
+                    .eq('population_id', population_id)
+                    .order('risk_score', { ascending: false })
+                    .limit(limit);
+
+                if (error) throw error;
+                return res.status(200).json({ rows: data });
+
             } else if (action === 'get_history') {
                 const { data, error } = await supabase
                     .from('audit_historical_samples')

@@ -56,6 +56,60 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
             const populationId = appState.selectedPopulation?.id;
 
             if (populationId) {
+                // ---------------------------------------------------------
+                // STRATEGY A: SERVER-SIDE SMART SAMPLING (RISK SCORING)
+                // ---------------------------------------------------------
+                // Optimization: If using Risk Scoring, let the DB sort and limit 
+                // to avoid fetching 20k rows to the browser just to sort them.
+                const isRiskScoring = appState.samplingMethod === SamplingMethod.NonStatistical &&
+                    appState.samplingParams.nonStatistical.selectedInsight === 'RiskScoring';
+
+                if (isRiskScoring) {
+                    console.log("🚀 Step 3: Using SERVER-SIDE Smart Selection...");
+                    const targetSize = appState.samplingParams.nonStatistical.sampleSize || 30;
+
+                    const res = await fetch(`/api/sampling_proxy?action=get_smart_sample&population_id=${populationId}&sample_size=${targetSize}`);
+                    if (!res.ok) throw new Error("Error en selección inteligente del servidor");
+                    const { rows } = await res.json();
+
+                    if (!rows || rows.length === 0) {
+                        alert("No se encontraron registros de alto riesgo.");
+                        setLoading(false);
+                        return;
+                    }
+
+                    // Map Direct Response to Sample Format
+                    const smartSample = rows.map((r: any) => ({
+                        id: String(r.unique_id_col),
+                        value: r.monetary_value_col || 0,
+                        risk_score: r.risk_score,
+                        risk_factors: r.risk_factors || [],
+                        risk_flag: 'ALTO RIESGO (DB)',
+                        risk_justification: `Selección Inteligente (Server-Side): Score ${r.risk_score}.`,
+                        is_manual_selection: true,
+                        raw_row: r.raw_json
+                    }));
+
+                    const results = {
+                        sampleSize: smartSample.length,
+                        sample: smartSample,
+                        totalErrorProjection: 0,
+                        upperErrorLimit: 0,
+                        findings: [],
+                        methodologyNotes: ["Muestreo Inteligente: Ejecutado directamente en motor de base de datos (Server-Side) por eficiencia."],
+                        observations: appState.observations
+                    };
+
+                    setAppState(prev => ({ ...prev, results }));
+                    setCurrentStep(Step.Results);
+                    setLoading(false);
+                    return; // EXIT EARLY - Skip Client Side Logic
+                }
+
+
+                // ---------------------------------------------------------
+                // STRATEGY B: CLIENT-SIDE SAMPLING (Standard)
+                // ---------------------------------------------------------
                 // 1. FETCH LIGHTWEIGHT UNIVERSE (NO RAW JSON) - Prevent Freeze
                 console.log("🚀 Step 3: Fetching Light Universe via Proxy...");
 

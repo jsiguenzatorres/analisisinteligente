@@ -18,7 +18,7 @@ const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onB
             setLoading(true);
             try {
                 // Use Proxy to bypass firewall
-                const res = await fetch(`/api/get_sample_history?population_id=${populationId}`);
+                const res = await fetch(`/api/sampling_proxy?action=get_history&population_id=${populationId}`);
                 if (!res.ok) throw new Error('Failed to fetch history');
 
                 const { history } = await res.json();

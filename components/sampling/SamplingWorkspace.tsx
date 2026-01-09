@@ -54,7 +54,7 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
 
         try {
             // Use Proxy to check history (Bypass Firewall)
-            const res = await fetch(`/api/get_sample_history?population_id=${appState.selectedPopulation.id}`);
+            const res = await fetch(`/api/sampling_proxy?action=get_history&population_id=${appState.selectedPopulation.id}`);
             if (!res.ok) throw new Error('Failed to check history');
 
             const { history } = await res.json();
@@ -93,7 +93,7 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
 
         try {
             // Use Proxy for fetching data (Bypass Firewall)
-            const res = await fetch(`/api/get_universe?population_id=${appState.selectedPopulation.id}`);
+            const res = await fetch(`/api/sampling_proxy?action=get_universe&population_id=${appState.selectedPopulation.id}`);
             if (!res.ok) throw new Error('Failed to fetch population data via proxy');
 
             const { rows: realRows } = await res.json();
@@ -141,7 +141,7 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                     is_final: true
                 };
 
-                const saveRes = await fetch('/api/save_sample', {
+                const saveRes = await fetch('/api/sampling_proxy?action=save_sample', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(savePayload)

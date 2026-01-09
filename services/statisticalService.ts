@@ -425,21 +425,26 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
             const residualV = statisticalPopulation.reduce((acc, curr) => acc + (curr.monetary_value_col || 0), 0);
 
             if (mus.usePilotSample) {
-                sampleSize = 30;
+                sampleSize = 30; // Hardcoded Pilot Size
                 methodologyNotes.push(METHODOLOGY_NOTES.MUS_PILOT);
-                const statisticalSample = selectItems(sampleSize, seed, statisticalPopulation, (_, row) => ({
-                    is_pilot_item: true,
-                    risk_flag: (row as any)?._is_originally_negative ? 'NEGATIVO_ABS' : RISK_MESSAGES.PILOT_PHASE,
-                    risk_justification: (row as any)?._is_originally_negative
-                        ? 'Ítem negativo tratado como valor absoluto para probabilística.'
-                        : RISK_MESSAGES.PILOT_JUSTIFICATION,
-                    absolute_value: (row as any)?._is_originally_negative ? row?.monetary_value_col : undefined
-                }));
 
-                sample = [...topStratumItems, ...negativeItems, ...statisticalSample];
-                sampleSize = sample.length;
+                // En modo Piloto, forzamos una selección puramente aleatoria/sistemática simple
+                // ignorando Estrato Superior y Negativos para garantizar rendimiento y velocidad.
                 pilotMetrics = { type: 'MUS_PILOT', initialEE: mus.EE, phase: 'PILOT_ONLY', initialSize: 30 };
+
+                // Selección simple de 30 ítems del universo total (sin segregar)
+                sample = selectItems(sampleSize, seed, realRows, () => ({
+                    is_pilot_item: true,
+                    risk_flag: RISK_MESSAGES.PILOT_PHASE,
+                    risk_justification: RISK_MESSAGES.PILOT_JUSTIFICATION
+                }));
             } else {
+                // ... ESTANDAR MUS LOGIC (Existing) ...
+                // Re-enable the calculate theoretical logic here
+                const theoreticalSampleSize = Math.ceil(residualV / samplingInterval);
+
+                // ... rest of logic ...
+
                 const theoreticalSampleSize = Math.ceil(residualV / samplingInterval);
                 const statisticalSample = selectItems(theoreticalSampleSize, seed, statisticalPopulation, (_, row) => ({
                     risk_flag: (row as any)?._is_originally_negative ? 'NEGATIVO_ABS' : undefined,

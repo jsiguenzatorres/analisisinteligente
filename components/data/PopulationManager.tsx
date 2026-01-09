@@ -36,15 +36,32 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
         setLoading(true);
         setError(null);
         try {
-            // Use Proxy to bypass Firewall
+            // Attempt 1: Try Proxy (Firewall Bypass)
+            console.log("Attempting Proxy Fetch...");
             const res = await fetch('/api/get_populations');
-            if (!res.ok) throw new Error('Error fetching populations via proxy');
+            if (res.ok) {
+                const { populations: data } = await res.json();
+                setPopulations(data || []);
+                return; // Success
+            }
+            throw new Error('Proxy fetch failed with status: ' + res.status);
+        } catch (proxyErr) {
+            console.warn("Proxy Fetch Failed, trying Direct Fallback:", proxyErr);
 
-            const { populations: data } = await res.json();
-            setPopulations(data || []);
-        } catch (err) {
-            console.error("Crash fetching populations:", err);
-            setError('Error de conexión al obtener proyectos (Proxy).');
+            // Attempt 2: Direct Supabase Fetch (Fallback)
+            try {
+                const { data, error } = await supabase
+                    .from('audit_populations')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+
+                if (error) throw error;
+                setPopulations(data as AuditPopulation[]);
+
+            } catch (directErr: any) {
+                console.error("All fetch methods failed:", directErr);
+                setError('No se pudieron cargar los proyectos. (Proxy & Direct Fail).');
+            }
         } finally {
             setLoading(false);
         }

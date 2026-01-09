@@ -179,6 +179,12 @@ export interface RiskProfile {
     gapAlerts: number;
 }
 
+export interface RiskAnalysisResult {
+    updatedRows: any[];
+    profile: RiskProfile;
+    advancedAnalysis: AdvancedAnalysis;
+}
+
 export interface AiRecommendation {
     recommendedMethod: SamplingMethod;
     confidenceScore: number;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AuditPopulation, RiskProfile } from '../../types';
 import { supabase } from '../../services/supabaseClient';
-import { performRiskProfiling } from '../../services/riskAnalysisService';
+import { performRiskProfiling, parseCurrency } from '../../services/riskAnalysisService';
 import { analyzePopulationAndRecommend } from '../../services/recommendationService'; // Import Recommendation Service
 import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from 'recharts';
 
@@ -25,10 +25,12 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
     const analyzeRisk = async () => {
         setLoading(true);
         try {
-            const { data: rows } = await supabase
-                .from('audit_data_rows')
-                .select('*')
-                .eq('population_id', population.id);
+            console.log("🚀 Starting Risk Analysis via Proxy...");
+            // 1. Fetch Data Rows using Proxy (Limit 2000 for now)
+            const res = await fetch(`/api/get_validation_data?id=${population.id}`);
+            if (!res.ok) throw new Error('Failed to load analysis data via proxy');
+
+            const { rows } = await res.json();
 
             if (!rows) throw new Error("Universo no disponible");
 
@@ -41,13 +43,10 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
             const plotData = updatedRows.map((r, index) => {
                 // Safeguard against missing column mapping or null values
                 const rawVal = r.raw_json?.[mapping.monetaryValue || ''];
-                let mValue = 0;
 
-                if (rawVal !== undefined && rawVal !== null) {
-                    const strVal = String(rawVal).replace(/[^0-9.-]+/g, "");
-                    mValue = parseFloat(strVal);
-                    if (isNaN(mValue)) mValue = 0;
-                }
+                // Use robust helper
+                let mValue = parseCurrency(rawVal);
+
 
                 // Prevent log(0) issues or infinities
                 const zVal = mValue > 0 ? Math.log10(mValue + 1) * 10 : 10;
@@ -64,15 +63,26 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
 
             setScatterData(plotData);
 
-            // Persistencia de scores forenses
+            // Persistencia de scores forenses via Proxy
+            console.log("💾 Saving Risk Scores via Proxy...");
             const batchUpdate = updatedRows.map(r => ({
                 id: r.id,
+                monetary_value_col: r.monetary_value_col, // Important for DB stats
                 risk_score: r.risk_score,
                 risk_factors: r.risk_factors
             }));
 
-            for (let i = 0; i < batchUpdate.length; i += 100) {
-                await supabase.from('audit_data_rows').upsert(batchUpdate.slice(i, i + 100));
+            // Use Proxy for Bulk Update
+            const saveRes = await fetch('/api/update_risk_batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ updates: batchUpdate })
+            });
+
+            if (!saveRes.ok) {
+                console.warn("⚠️ Error saving risk scores, but analysis continues locally.", await saveRes.text());
+            } else {
+                console.log("✅ Risk Scores Saved Successfully");
             }
 
             // Dictamen Forense Local (Heurístico)

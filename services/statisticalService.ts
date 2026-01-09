@@ -439,12 +439,6 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
                     risk_justification: RISK_MESSAGES.PILOT_JUSTIFICATION
                 }));
             } else {
-                // ... ESTANDAR MUS LOGIC (Existing) ...
-                // Re-enable the calculate theoretical logic here
-                const theoreticalSampleSize = Math.ceil(residualV / samplingInterval);
-
-                // ... rest of logic ...
-
                 const theoreticalSampleSize = Math.ceil(residualV / samplingInterval);
                 const statisticalSample = selectItems(theoreticalSampleSize, seed, statisticalPopulation, (_, row) => ({
                     risk_flag: (row as any)?._is_originally_negative ? 'NEGATIVO_ABS' : undefined,

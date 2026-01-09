@@ -37,15 +37,28 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
         setError(null);
         try {
             // Attempt 1: Try Proxy (Firewall Bypass)
-            const res = await fetch('/api/sampling_proxy?action=get_populations');
-            if (res.ok) {
-                const { populations: data } = await res.json();
-                setPopulations(data || []);
-                return;
+            // ADDED TIMEOUT: If proxy hangs (e.g. wrong Vercel URL), fail fast (5s)
+            console.log("🌐 Intentando cargar poblaciones vía Proxy...");
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+            try {
+                const res = await fetch('/api/sampling_proxy?action=get_populations', { signal: controller.signal });
+                clearTimeout(timeoutId);
+
+                if (res.ok) {
+                    const { populations: data } = await res.json();
+                    setPopulations(data || []);
+                    return;
+                }
+                throw new Error(`Proxy failed (${res.status})`);
+            } catch (fetchErr: any) {
+                if (fetchErr.name === 'AbortError') throw new Error("Proxy Timeout (5s)");
+                throw fetchErr;
             }
-            throw new Error(`Proxy failed (${res.status})`);
+
         } catch (proxyErr: any) {
-            console.warn("Proxy Fetch Failed, trying Direct Fallback:", proxyErr);
+            console.warn(`⚠️ Proxy Fetch Failed (${proxyErr.message}), trying Direct Fallback...`);
 
             // Attempt 2: Direct Supabase Fetch (Fallback for Localhost)
             try {

@@ -58,20 +58,36 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
             if (appState.selectedPopulation) {
                 // Use Proxy to bypass Firewall
                 console.log("🚀 Step 3: Fetching data via Proxy...");
-                const res = await fetch(`/api/sampling_proxy?action=get_universe&population_id=${appState.selectedPopulation.id}`);
 
-                if (!res.ok) {
-                    throw new Error(`Proxy Fetch Failed: ${res.statusText}`);
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s Timeout
+
+                try {
+                    const res = await fetch(`/api/sampling_proxy?action=get_universe&population_id=${appState.selectedPopulation.id}`, {
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
+
+                    if (!res.ok) {
+                        throw new Error(`Proxy Fetch Failed: ${res.status} ${res.statusText}`);
+                    }
+
+                    const { rows } = await res.json();
+
+                    if (!rows || rows.length === 0) {
+                        alert("ERROR CRÍTICO: No se encontraron registros asociados (Proxy).");
+                        setLoading(false);
+                        return;
+                    }
+                    realRows = rows;
+                } catch (proxyErr: any) {
+                    if (proxyErr.name === 'AbortError') {
+                        throw new Error("La carga de datos tardó demasiado (Timeout 20s). Verifique su conexión.");
+                    }
+                    throw proxyErr;
                 }
 
-                const { rows } = await res.json();
 
-                if (!rows || rows.length === 0) {
-                    alert("ERROR CRÍTICO: No se encontraron registros asociados (Proxy).");
-                    setLoading(false);
-                    return;
-                }
-                realRows = rows;
             }
 
             const results = calculateSampleSize(appState, realRows);
@@ -122,8 +138,8 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
                                     key={tab.id}
                                     onClick={() => handleMethodChange(tab.id)}
                                     className={`${isActive
-                                            ? 'border-blue-600 text-blue-700 bg-white shadow-[0_-4px_10px_rgba(0,0,0,0.03)]'
-                                            : 'border-transparent text-slate-400 hover:text-slate-600 hover:bg-slate-50'
+                                        ? 'border-blue-600 text-blue-700 bg-white shadow-[0_-4px_10px_rgba(0,0,0,0.03)]'
+                                        : 'border-transparent text-slate-400 hover:text-slate-600 hover:bg-slate-50'
                                         } whitespace-nowrap py-5 px-6 border-b-2 font-black text-[10px] uppercase tracking-[0.15em] flex items-center transition-all flex-1 justify-center`}
                                 >
                                     <i className={`fas ${tab.icon} mr-3 ${isActive ? 'text-blue-600' : 'text-slate-300'}`}></i>

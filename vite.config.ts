@@ -14,6 +14,11 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
           rewrite: (path) => path.replace(/^\/supaproxy/, ''),
+        },
+        '/api': {
+          target: 'https://analisisinteligente.vercel.app', // Production Vercel App
+          changeOrigin: true,
+          secure: true,
         }
       }
     },

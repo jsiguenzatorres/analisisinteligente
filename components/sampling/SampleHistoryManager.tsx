@@ -18,13 +18,23 @@ const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onB
             setLoading(true);
             try {
                 // Use Proxy to bypass firewall
-                const res = await fetch(`/api/sampling_proxy?action=get_history&population_id=${populationId}`);
-                if (!res.ok) throw new Error('Failed to fetch history');
+                console.log("🌐 Intentando cargar historial vía Proxy...");
+
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s Timeout
+
+                const res = await fetch(`/api/sampling_proxy?action=get_history&population_id=${populationId}`, { signal: controller.signal });
+                clearTimeout(timeoutId);
+
+                if (!res.ok) throw new Error(`Proxy Failed: ${res.status}`);
 
                 const { history } = await res.json();
                 if (history) setHistory(history as HistoricalSample[]);
-            } catch (err) {
+            } catch (err: any) {
                 console.error("Error fetching history:", err);
+                if (err.name === 'AbortError') {
+                    console.warn("Proxy Timeout (10s)");
+                }
             } finally {
                 setLoading(false);
             }

@@ -54,27 +54,31 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
         setLoading(true);
         try {
             let realRows: any[] = [];
-            
+
             if (appState.selectedPopulation) {
-                const { data, error } = await supabase
-                    .from('audit_data_rows')
-                    .select('unique_id_col, monetary_value_col, raw_json')
-                    .eq('population_id', appState.selectedPopulation.id)
-                    .limit(10000); 
-                
-                if (error || !data || data.length === 0) {
-                    alert("ERROR CRÍTICO: No se encontraron registros asociados.");
+                // Use Proxy to bypass Firewall
+                console.log("🚀 Step 3: Fetching data via Proxy...");
+                const res = await fetch(`/api/sampling_proxy?action=get_universe&population_id=${appState.selectedPopulation.id}`);
+
+                if (!res.ok) {
+                    throw new Error(`Proxy Fetch Failed: ${res.statusText}`);
+                }
+
+                const { rows } = await res.json();
+
+                if (!rows || rows.length === 0) {
+                    alert("ERROR CRÍTICO: No se encontraron registros asociados (Proxy).");
                     setLoading(false);
                     return;
                 }
-                realRows = data;
+                realRows = rows;
             }
 
             const results = calculateSampleSize(appState, realRows);
             // Adjuntar observaciones actuales a los resultados para el reporte
             results.observations = appState.observations;
-            
-            setAppState(prev => ({...prev, results}));
+
+            setAppState(prev => ({ ...prev, results }));
             setCurrentStep(Step.Results);
         } catch (error) {
             alert("Ocurrió un error inesperado calculando la muestra.");
@@ -82,7 +86,7 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
             setLoading(false);
         }
     };
-    
+
     const tabs = [
         { id: SamplingMethod.Attribute, label: 'Atributos', icon: 'fa-check-circle' },
         { id: SamplingMethod.MUS, label: 'MUS', icon: 'fa-dollar-sign' },
@@ -106,40 +110,39 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
                     )}
                 </div>
             </div>
-            
+
             <div className="bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden">
                 {/* Tabs de Métodos */}
                 <div className="border-b border-slate-100 bg-slate-50/50">
                     <nav className="flex overflow-x-auto" aria-label="Tabs">
                         {tabs.map(tab => {
-                             const isActive = appState.samplingMethod === tab.id;
-                             return (
+                            const isActive = appState.samplingMethod === tab.id;
+                            return (
                                 <button
                                     key={tab.id}
                                     onClick={() => handleMethodChange(tab.id)}
-                                    className={`${
-                                        isActive
+                                    className={`${isActive
                                             ? 'border-blue-600 text-blue-700 bg-white shadow-[0_-4px_10px_rgba(0,0,0,0.03)]'
                                             : 'border-transparent text-slate-400 hover:text-slate-600 hover:bg-slate-50'
-                                    } whitespace-nowrap py-5 px-6 border-b-2 font-black text-[10px] uppercase tracking-[0.15em] flex items-center transition-all flex-1 justify-center`}
+                                        } whitespace-nowrap py-5 px-6 border-b-2 font-black text-[10px] uppercase tracking-[0.15em] flex items-center transition-all flex-1 justify-center`}
                                 >
                                     <i className={`fas ${tab.icon} mr-3 ${isActive ? 'text-blue-600' : 'text-slate-300'}`}></i>
                                     {tab.label}
                                 </button>
-                             );
+                            );
                         })}
                     </nav>
                 </div>
 
                 {/* Sub-Tabs: Configuración vs Observaciones */}
                 <div className="flex bg-slate-100/50 p-2 border-b border-slate-100">
-                    <button 
+                    <button
                         onClick={() => setActiveSubTab('config')}
                         className={`flex-1 py-2 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all ${activeSubTab === 'config' ? 'bg-white text-slate-800 shadow-sm border border-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
                     >
                         <i className="fas fa-cog mr-2"></i> Configuración Técnica
                     </button>
-                    <button 
+                    <button
                         onClick={() => setActiveSubTab('observations')}
                         className={`flex-1 py-2 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all ${activeSubTab === 'observations' ? 'bg-white text-slate-800 shadow-sm border border-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
                     >
@@ -157,23 +160,23 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
                             {appState.samplingMethod === SamplingMethod.NonStatistical && <NonStatisticalSampling appState={appState} setAppState={setAppState} />}
                         </>
                     ) : (
-                        <ObservationsManager 
-                            populationId={appState.selectedPopulation!.id} 
+                        <ObservationsManager
+                            populationId={appState.selectedPopulation!.id}
                             method={appState.samplingMethod}
-                            onObservationsUpdate={(obs) => setAppState(prev => ({...prev, observations: obs}))}
+                            onObservationsUpdate={(obs) => setAppState(prev => ({ ...prev, observations: obs }))}
                         />
                     )}
                 </div>
 
-                 <div className="px-8 py-6 bg-slate-50 border-t border-slate-100 flex justify-between items-center">
-                    <button 
-                        onClick={() => setCurrentStep(Step.GeneralParams)} 
+                <div className="px-8 py-6 bg-slate-50 border-t border-slate-100 flex justify-between items-center">
+                    <button
+                        onClick={() => setCurrentStep(Step.GeneralParams)}
                         className="px-6 py-3 bg-white border border-slate-200 rounded-2xl text-xs font-black text-slate-400 uppercase tracking-widest hover:text-slate-700 transition-all shadow-sm"
                     >
                         <i className="fas fa-chevron-left mr-3"></i> Atrás
                     </button>
-                    <button 
-                        onClick={handleRunSampling} 
+                    <button
+                        onClick={handleRunSampling}
                         disabled={loading || dataStatus.status !== 'success'}
                         className="px-10 py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl transition-all transform hover:-translate-y-1 disabled:opacity-50"
                     >

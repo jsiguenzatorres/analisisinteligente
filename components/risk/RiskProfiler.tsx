@@ -3,6 +3,7 @@ import { AuditPopulation, RiskProfile } from '../../types';
 import { supabase } from '../../services/supabaseClient';
 import { performRiskProfiling, parseCurrency } from '../../services/riskAnalysisService';
 import { analyzePopulationAndRecommend } from '../../services/recommendationService'; // Import Recommendation Service
+import { useToast } from '../ui/ToastContext';
 import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from 'recharts';
 
 interface Props {
@@ -17,6 +18,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
     const [insight, setInsight] = useState<string>('');
     // New state to hold analysis for recommendation
     const [analysisData, setAnalysisData] = useState<any>(null);
+    const { addToast } = useToast();
 
     useEffect(() => {
         analyzeRisk();
@@ -88,7 +90,13 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
 
             // Dictamen Forense Local (Heurístico)
             const riskLevel = newProfile.totalRiskScore > 70 ? 'CRÍTICA' : newProfile.totalRiskScore > 40 ? 'MODERADA' : 'BAJA';
-            setInsight(`El motor forense ha detectado una vulnerabilidad ${riskLevel}. Se identificaron ${newProfile.gapAlerts} puntos críticos que requieren inspección manual obligatoria para cumplir con la NIA 530.`);
+            const insightMsg = `El motor forense ha detectado una vulnerabilidad ${riskLevel}. Se identificaron ${newProfile.gapAlerts} puntos críticos que requieren inspección manual obligatoria para cumplir con la NIA 530.`;
+            setInsight(insightMsg);
+
+            // AUTO-NOTIFY USER (Requested Feature)
+            if (newProfile.gapAlerts > 0 || newProfile.totalRiskScore > 40) {
+                addToast("Patrones complejos detectados. Se ha activado la Estrategia Forense.", 'info');
+            }
 
         } catch (err) {
             console.error(err);

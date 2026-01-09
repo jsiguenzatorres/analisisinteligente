@@ -359,7 +359,7 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
             }
 
             // Recalcular V efectivo tras tratamiento de negativos
-            const effectiveV = processedRows.reduce((acc, curr) => acc + (curr.monetary_value_col || 0), 0);
+            const effectiveV = Math.abs(processedRows.reduce((acc, curr) => acc + (curr.monetary_value_col || 0), 0));
 
             // MUS: Cálculo exacto basado en Factores de Confiabilidad y Expansión
             const ncKey = mus.RIA <= 5 ? 95 : 90; // Mapeo de RIA a NC
@@ -370,15 +370,27 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
             const numerator = effectiveV * fcMus;
             const denominator = mus.TE - (mus.EE * feMus);
 
-            if (denominator <= 0) {
+            if (denominator <= 1) { // Guard against <= 0 AND very small positives to prevent explosion
                 // Escenario donde el error esperado + expansión devora la materialidad
                 sampleSize = Math.min(processedRows.length, 500); // Límite técnico de seguridad
                 methodologyNotes.push("Advertencia MUS: El error esperado supera la capacidad del modelo. Se aplica tamaño máximo prudencial.");
             } else {
-                sampleSize = Math.ceil(numerator / denominator);
+                let calculatedSize = Math.ceil(numerator / denominator);
+
+                // Safety Cap: Never exceed population size (Census)
+                if (calculatedSize > processedRows.length) {
+                    calculatedSize = processedRows.length;
+                    methodologyNotes.push(`Nota: El tamaño calculado excede la población. Se seleccionó el 100% de los registros (${calculatedSize}).`);
+                }
+
+                // Hard Cap to prevent Browser Crash if processedRows is huge (though limited by Proxy to 20k)
+                // If calculatedSize is massive (e.g. > 20k) but rows are fewer, above check handles it.
+                // But if calculatedSize is massive and rows are 0?
+
+                sampleSize = Math.max(0, calculatedSize);
             }
 
-            const samplingInterval = effectiveV / sampleSize;
+            const samplingInterval = sampleSize > 0 ? effectiveV / sampleSize : 0;
 
             // PIPELINE NIA 530 - ETAPA B: Estrato de Certeza (Top-Stratum) e Integración Forense
             let topStratumItems: AuditSampleItem[] = [];

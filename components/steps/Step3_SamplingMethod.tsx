@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { AppState, SamplingMethod, Step, AuditObservation } from '../../types';
 import AttributeSampling from '../samplingMethods/AttributeSampling';
@@ -54,48 +53,76 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
         setLoading(true);
         try {
             let realRows: any[] = [];
+            const populationId = appState.selectedPopulation?.id;
 
-            if (appState.selectedPopulation) {
-                // Use Proxy to bypass Firewall
-                console.log("🚀 Step 3: Fetching data via Proxy...");
+            if (populationId) {
+                // 1. FETCH LIGHTWEIGHT UNIVERSE (NO RAW JSON) - Prevent Freeze
+                console.log("🚀 Step 3: Fetching Light Universe via Proxy...");
 
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s Timeout
+                const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s Timeout
 
                 try {
-                    const res = await fetch(`/api/sampling_proxy?action=get_universe&population_id=${appState.selectedPopulation.id}`, {
+                    // Stratified MultiVariable needs raw_json to classiy
+                    const isStratifiedMulti = appState.samplingMethod === SamplingMethod.Stratified && appState.samplingParams.stratified.basis === 'MultiVariable';
+                    const detailedParam = isStratifiedMulti ? 'true' : 'false';
+
+                    const res = await fetch(`/api/sampling_proxy?action=get_universe&population_id=${populationId}&detailed=${detailedParam}`, {
                         signal: controller.signal
                     });
                     clearTimeout(timeoutId);
 
-                    if (!res.ok) {
-                        throw new Error(`Proxy Fetch Failed: ${res.status} ${res.statusText}`);
-                    }
-
+                    if (!res.ok) throw new Error(`Proxy Fetch Failed: ${res.status}`);
                     const { rows } = await res.json();
 
                     if (!rows || rows.length === 0) {
-                        alert("ERROR CRÍTICO: No se encontraron registros asociados (Proxy).");
+                        alert("ERROR CRÍTICO: No se encontraron registros.");
                         setLoading(false);
                         return;
                     }
                     realRows = rows;
+
                 } catch (proxyErr: any) {
-                    if (proxyErr.name === 'AbortError') {
-                        throw new Error("La carga de datos tardó demasiado (Timeout 20s). Verifique su conexión.");
-                    }
+                    if (proxyErr.name === 'AbortError') throw new Error("Tiempo de espera agotado cargando universo. (Timeout 30s)");
                     throw proxyErr;
                 }
-
-
             }
 
+            // 2. CALCULATE SAMPLE (Using Light Data)
+            // calculateSampleSize logic works with subsets of data for MUS/Attribute
             const results = calculateSampleSize(appState, realRows);
-            // Adjuntar observaciones actuales a los resultados para el reporte
-            results.observations = appState.observations;
 
+            // 3. HYDRATE SAMPLE WITH FULL DETAILS (Fetch only selected IDs)
+            const isStratifiedMulti = appState.samplingMethod === SamplingMethod.Stratified && appState.samplingParams.stratified.basis === 'MultiVariable';
+
+            // If we fetched light data, we must hydrate the sample rows with their raw_json
+            if (populationId && results.sample.length > 0 && !isStratifiedMulti) {
+                const selectedIds = results.sample.map(s => s.id);
+
+                console.log(`🚀 Hydrating ${selectedIds.length} items...`);
+                // Batch Request to Proxy
+                const detailsRes = await fetch('/api/sampling_proxy?action=get_rows_batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ population_id: populationId, ids: selectedIds })
+                });
+
+                if (detailsRes.ok) {
+                    const { rows: details } = await detailsRes.json();
+                    // Merge raw_json into sample results
+                    const detailMap = new Map(details.map((d: any) => [String(d.unique_id_col), d.raw_json]));
+
+                    results.sample = results.sample.map(item => ({
+                        ...item,
+                        raw_row: detailMap.get(String(item.id)) || item.raw_row
+                    }));
+                }
+            }
+
+            results.observations = appState.observations;
             setAppState(prev => ({ ...prev, results }));
             setCurrentStep(Step.Results);
+
         } catch (error: any) {
             console.error("Sampling Error:", error);
             alert(`Error: ${error.message || "Ocurrió un error inesperado."}`);

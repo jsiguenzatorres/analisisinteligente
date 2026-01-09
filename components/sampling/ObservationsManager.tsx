@@ -40,17 +40,16 @@ const ObservationsManager: React.FC<Props> = ({ populationId, method, onObservat
     const fetchObservations = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
-                .from('observaciones_auditoria')
-                .select('*')
-                .eq('id_poblacion', populationId)
-                .eq('metodo', method)
-                .order('fecha_creacion', { ascending: false });
+            // FETCH VIA PROXY (Firewall Bypass)
+            const res = await fetch(`/api/sampling_proxy?action=get_observations&population_id=${populationId}`);
+            if (!res.ok) throw new Error("Proxy Fetch Failed");
 
-            if (error) {
-                console.error("Error Supabase Query:", error);
-            } else if (data) {
-                const formattedData = data.map(obs => ({
+            const { observations: data } = await res.json();
+
+            if (data) {
+                const methodFiltered = data.filter((o: any) => o.metodo === method);
+
+                const formattedData = methodFiltered.map((obs: any) => ({
                     ...obs,
                     evidencias: Array.isArray(obs.evidencias) ? obs.evidencias : []
                 }));
@@ -58,7 +57,7 @@ const ObservationsManager: React.FC<Props> = ({ populationId, method, onObservat
                 onObservationsUpdate(formattedData as AuditObservation[]);
             }
         } catch (err) {
-            console.error("Error al cargar observaciones:", err);
+            console.error("Error al cargar observaciones (Proxy):", err);
         } finally {
             setLoading(false);
         }
@@ -137,31 +136,30 @@ const ObservationsManager: React.FC<Props> = ({ populationId, method, onObservat
 
         setIsSaving(true);
         try {
+            // PROXY SAVE (Firewall Bypass)
             const finalEvidencias = Array.isArray(formData.evidencias) ? formData.evidencias : [];
             const payload = {
+                id: editingId || undefined,
                 titulo: formData.titulo,
                 descripcion: formData.descripcion,
                 severidad: formData.severidad,
                 tipo: formData.tipo,
-                evidencias: finalEvidencias
+                evidencias: finalEvidencias,
+                id_poblacion: populationId,
+                metodo: method,
+                creado_por: CURRENT_USER
             };
 
-            let responseError;
-            if (editingId) {
-                const { error } = await supabase.from('observaciones_auditoria').update(payload).eq('id', editingId);
-                responseError = error;
-            } else {
-                const nuevaObservacion = {
-                    ...payload,
-                    id_poblacion: populationId,
-                    metodo: method,
-                    creado_por: CURRENT_USER
-                };
-                const { error } = await supabase.from('observaciones_auditoria').insert(nuevaObservacion);
-                responseError = error;
-            }
+            const res = await fetch('/api/sampling_proxy?action=save_observation', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
 
-            if (responseError) throw responseError;
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`Proxy Error: ${errText}`);
+            }
 
             await fetchObservations();
             setIsAdding(false);
@@ -169,7 +167,7 @@ const ObservationsManager: React.FC<Props> = ({ populationId, method, onObservat
             setFormData({ titulo: '', descripcion: '', severidad: 'Medio', tipo: 'Sustantivo', evidencias: [] });
 
         } catch (err: any) {
-            addToast(`ERROR AL GUARDAR: ${err.message}`, 'error');
+            addToast(`ERROR AL GUARDAR (PROXY): ${err.message}`, 'error');
         } finally {
             setIsSaving(false);
         }
@@ -180,11 +178,18 @@ const ObservationsManager: React.FC<Props> = ({ populationId, method, onObservat
         const id = obsToDelete;
         setObsToDelete(null);
         try {
-            const { error } = await supabase.from('observaciones_auditoria').delete().eq('id', id);
-            if (error) throw error;
+            // PROXY DELETE
+            const res = await fetch('/api/sampling_proxy?action=delete_observation', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id })
+            });
+
+            if (!res.ok) throw new Error("Delete Failed");
+
             await fetchObservations();
         } catch (err: any) {
-            addToast("No se pudo eliminar.", 'error');
+            addToast("No se pudo eliminar (Proxy Error).", 'error');
         }
     };
 

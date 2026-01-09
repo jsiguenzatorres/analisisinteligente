@@ -54,7 +54,8 @@ const MonetaryUnitSampling: React.FC<Props> = ({ appState, setAppState }) => {
 
     const rf = getRFactor(params.RIA);
     const intervalValue = params.TE / rf;
-    const theoreticalN = Math.ceil(params.V / intervalValue);
+    const absV = Math.abs(params.V); // Handle negative population values (e.g. Liabilities)
+    const theoreticalN = Math.ceil(absV / intervalValue);
     const isPilotInefficient = params.usePilotSample && theoreticalN < 30;
 
     const adjustToStatisticalMin = () => {

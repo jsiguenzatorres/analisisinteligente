@@ -67,7 +67,7 @@ export default async function handler(req, res) {
             } else if (action === 'get_smart_sample') {
                 // SERVER-SIDE SAMPLING (Risk Based)
                 // Returns top N riskiest items directly from DB to avoid browser processing of 20k rows.
-                const { population_id, sample_size } = req.query;
+                const { sample_size } = req.query; // population_id already declared above
                 const limit = parseInt(sample_size) || 30;
 
                 const { data, error } = await supabase

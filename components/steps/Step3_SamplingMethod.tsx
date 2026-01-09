@@ -50,10 +50,7 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
     };
 
     const handleRunSampling = async () => {
-        // DEBUG: PROBAR SI SE ACTUALIZÓ
-        // alert("DEBUG: MODO SERVER-SIDE ACTIVO v2"); 
-        // Comentado para producción limpio, pero descomentar si persiste la duda
-        console.log("Starting Sampling...");
+        // console.log("Starting Sampling..."); // Removed alert
         setLoading(true);
         try {
             let realRows: any[] = [];
@@ -244,7 +241,9 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
         <div className="animate-fade-in">
             <div className="flex justify-between items-start mb-4">
                 <div>
-                    <h2 className="text-2xl font-black text-slate-800 tracking-tight">Selección del Método de Muestreo</h2>
+                    <h3 className="text-xl font-black text-slate-800">
+                        Definición del Método de Muestreo <span className="text-emerald-500 text-sm">[v2.5 SERVER]</span>
+                    </h3>
                     <p className="text-slate-500 text-sm">Configure los parámetros técnicos o registre observaciones cualitativas de la población.</p>
                 </div>
                 <div className="mt-1">

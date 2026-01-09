@@ -96,8 +96,9 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
 
             setAppState(prev => ({ ...prev, results }));
             setCurrentStep(Step.Results);
-        } catch (error) {
-            alert("Ocurrió un error inesperado calculando la muestra.");
+        } catch (error: any) {
+            console.error("Sampling Error:", error);
+            alert(`Error: ${error.message || "Ocurrió un error inesperado."}`);
         } finally {
             setLoading(false);
         }

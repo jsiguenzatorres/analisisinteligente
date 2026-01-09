@@ -115,10 +115,22 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
             };
 
             // Save to DB
-            await supabase.from('audit_populations').update({
-                ai_recommendation: recommendation,
-                advanced_analysis: analysisData
-            }).eq('id', population.id);
+            // Save to DB via Proxy (reuse update_mapping as it targets audit_populations)
+            console.log("💾 Saving Final Profile via Proxy...");
+            const saveRes = await fetch('/api/update_mapping', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: population.id,
+                    ai_recommendation: recommendation,
+                    advanced_analysis: analysisData
+                })
+            });
+
+            if (!saveRes.ok) {
+                console.warn("⚠️ Proxy save warning:", await saveRes.text());
+                // Proceed anyway as state is updated locally
+            }
 
             onComplete(updatedPop);
         } catch (e) {

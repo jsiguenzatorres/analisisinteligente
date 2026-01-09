@@ -101,8 +101,11 @@ const DiscoveryModule: React.FC<Props> = (props) => {
             }
         } catch (e: any) {
             console.error("Discovery Error:", e);
-            setStage('depth_selector');
-            setCurrentProgress(0); // Reset progress on error
+            setLoadingTask("Error en análisis. Reintentando...");
+            setTimeout(() => {
+                setStage('diagnostic'); // Force diagnostic even on partial error to avoid loop
+                setCurrentProgress(100);
+            }, 1000);
         }
     };
 

@@ -24,33 +24,24 @@ const AdminUserManagementView: React.FC = () => {
         const fetchUsers = async () => {
             try {
                 setLoading(true);
-                setLastError(null); // Limpiar errores previos
-                console.log("Admin: Iniciando carga de usuarios con Timeout de seguridad...");
+                setLastError(null);
+                console.log("Admin: Iniciando carga de usuarios vía Proxy...");
 
-                // Promesa con Timeout de 5 segundos para evitar carga infinita
-                const timeoutPromise = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Timeout: La conexión tardó demasiado')), 5000)
-                );
+                // Fetch via Proxy to bypass firewall
+                const res = await fetch('/api/admin_get_users');
+                if (!res.ok) {
+                    throw new Error('Error fetching users via proxy: ' + res.statusText);
+                }
 
-                const queryPromise = supabase
-                    .from('profiles')
-                    .select('*')
-                    .order('registration_date', { ascending: false });
-
-                // Carrera: quien termine primero (la query o el error de tiempo)
-                const { data, error } = await Promise.race([queryPromise, timeoutPromise]) as any;
-
-                if (error) throw error;
-
-                console.log("AdminView: Datos recibidos:", data); // DEBUG
+                const { users: data } = await res.json();
+                console.log("AdminView: Datos recibidos:", data);
 
                 if (isMounted) {
                     setUsers(data || []);
                 }
             } catch (err: any) {
-                console.error("Error fetching users (o Timeout):", err);
+                console.error("Error fetching users:", err);
                 if (isMounted) setLastError(err);
-                // Si falla, dejamos la lista vacía para que muestre "No hay usuarios" o similar
                 if (isMounted) setUsers([]);
             } finally {
                 if (isMounted) setLoading(false);

@@ -95,28 +95,42 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
             // 3. HYDRATE SAMPLE WITH FULL DETAILS (Fetch only selected IDs)
             const isStratifiedMulti = appState.samplingMethod === SamplingMethod.Stratified && appState.samplingParams.stratified.basis === 'MultiVariable';
 
-            // If we fetched light data, we must hydrate the sample rows with their raw_json
             if (populationId && results.sample.length > 0 && !isStratifiedMulti) {
                 const selectedIds = results.sample.map(s => s.id);
-
                 console.log(`🚀 Hydrating ${selectedIds.length} items...`);
-                // Batch Request to Proxy
-                const detailsRes = await fetch('/api/sampling_proxy?action=get_rows_batch', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ population_id: populationId, ids: selectedIds })
-                });
 
-                if (detailsRes.ok) {
-                    const { rows: details } = await detailsRes.json();
-                    // Merge raw_json into sample results
-                    const detailMap = new Map(details.map((d: any) => [String(d.unique_id_col), d.raw_json]));
+                // CHUNK STRATEGY to avoid Vercel 4.5MB Limit
+                const CHUNK_SIZE = 50;
+                const hydratedMap = new Map<string, any>();
 
-                    results.sample = results.sample.map(item => ({
-                        ...item,
-                        raw_row: detailMap.get(String(item.id)) || item.raw_row
-                    }));
+                for (let i = 0; i < selectedIds.length; i += CHUNK_SIZE) {
+                    const chunkIds = selectedIds.slice(i, i + CHUNK_SIZE);
+                    // Optional: Update loading state with % here if we had a detailed state
+                    // setLoadingText(`Descargando detalles (${i + chunkIds.length}/${selectedIds.length})...`); 
+
+                    try {
+                        const chunkRes = await fetch('/api/sampling_proxy?action=get_rows_batch', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ population_id: populationId, ids: chunkIds })
+                        });
+
+                        if (chunkRes.ok) {
+                            const { rows: chunks } = await chunkRes.json();
+                            chunks.forEach((d: any) => hydratedMap.set(String(d.unique_id_col), d.raw_json));
+                        } else {
+                            console.warn(`Failed to hydrate chunk ${i / CHUNK_SIZE}`);
+                        }
+                    } catch (chunkErr) {
+                        console.error(`Error hydrating chunk ${i}:`, chunkErr);
+                    }
                 }
+
+                // Apply hydrated data
+                results.sample = results.sample.map(item => ({
+                    ...item,
+                    raw_row: hydratedMap.get(String(item.id)) || item.raw_row
+                }));
             }
 
             results.observations = appState.observations;

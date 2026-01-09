@@ -86,6 +86,24 @@ export default async function handler(req, res) {
 
                 if (error) throw error;
                 return res.status(200).json(data);
+
+            } else if (action === 'save_work_in_progress') {
+                const { population_id, results_json, sample_size } = req.body;
+                if (!population_id || !results_json) return res.status(400).json({ error: 'Missing required fields' });
+
+                const { data, error } = await supabase
+                    .from('audit_results')
+                    .upsert({
+                        population_id,
+                        results_json,
+                        sample_size,
+                        updated_at: new Date().toISOString()
+                    }, { onConflict: 'population_id' })
+                    .select();
+
+                if (error) throw error;
+                return res.status(200).json(data);
+
             } else {
                 return res.status(400).json({ error: 'Invalid POST action' });
             }

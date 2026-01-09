@@ -96,25 +96,24 @@ const MonetaryResultsView: React.FC<Props> = ({ appState, setAppState, role, onB
                 last_method: appState.samplingMethod
             };
 
-            const { error } = await supabase
-                .from('audit_results')
-                .upsert({
+            // Use Proxy to save work in progress (Bypass Firewall)
+            const saveRes = await fetch('/api/sampling_proxy?action=save_work_in_progress', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
                     population_id: appState.selectedPopulation.id,
                     results_json: updatedStorage,
-                    sample_size: updatedResults.sampleSize,
-                    updated_at: new Date().toISOString()
-                }, { onConflict: 'population_id' });
+                    sample_size: updatedResults.sampleSize
+                })
+            });
 
-            if (error) {
-                console.error("Error saving results to DB:", error);
-                setSaveFeedback({ show: true, title: "Error de Sincronización", message: error.message, type: 'error' });
-            } else {
-                // Actualizamos el estado global con el nuevo storage para que App.tsx esté sincronizado
-                setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
+            if (!saveRes.ok) throw new Error('Failed to save work in progress via proxy');
 
-                if (!silent) {
-                    setSaveFeedback({ show: true, title: "Sincronizado", message: "Papel de trabajo actualizado en la nube.", type: 'success' });
-                }
+            // Actualizamos el estado global con el nuevo storage para que App.tsx esté sincronizado
+            setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
+
+            if (!silent) {
+                setSaveFeedback({ show: true, title: "Sincronizado", message: "Papel de trabajo actualizado en la nube.", type: 'success' });
             }
         } catch (err: any) {
             console.error("Exception saving to DB:", err);
@@ -506,8 +505,8 @@ const MonetaryResultsView: React.FC<Props> = ({ appState, setAppState, role, onB
                         </div>
                         <div className="flex justify-between mt-2">
                             <div className="text-center">
-                                <span className="block text-[9px] font-black text-slate-300 uppercase">Error Proyectado</span>
-                                <span className={`text-xs font-black ${isAcceptable ? 'text-emerald-500' : 'text-rose-500'}`}>${inference.projectedError.toLocaleString()}</span>
+                                <span className="block text-[9px] font-black text-slate-300 uppercase">Error Real</span>
+                                <span className="text-xs font-black text-blue-600">${actualErrorSum.toLocaleString()}</span>
                             </div>
                             <div className="text-center">
                                 <span className="block text-[9px] font-black text-slate-300 uppercase">Error Proyectado</span>

@@ -136,13 +136,25 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                     is_current: true
                 };
 
-                const { data: savedSample, error: saveError } = await supabase
-                    .from('audit_historical_samples')
-                    .insert(historicalData)
-                    .select()
-                    .single();
+                // Use Proxy for Saving to avoid Firewall issues
+                const savePayload = {
+                    population_id: appState.selectedPopulation.id,
+                    method: appState.samplingMethod,
+                    sample_data: historicalData,
+                    is_final: true
+                };
 
-                if (saveError) throw saveError;
+                const saveRes = await fetch('/api/save_sample', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(savePayload)
+                });
+
+                if (!saveRes.ok) throw new Error(await saveRes.text());
+
+                const savedSample = await saveRes.json();
+
+                // if (saveError) throw saveError; // Handled by proxy check above
 
                 setAppState(prev => {
                     const currentMethodResults = {

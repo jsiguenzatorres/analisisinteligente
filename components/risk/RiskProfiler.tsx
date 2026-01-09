@@ -59,7 +59,8 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                     name: r.unique_id_col || `ID-${index}`,
                     value: mValue
                 };
-            }).filter(d => d.y > 0);
+            });
+            // Removed filter(d => d.y > 0) to show neutral items too, giving context to the auditor
 
             setScatterData(plotData);
 

@@ -40,7 +40,7 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
             // ADDED TIMEOUT: If proxy hangs (e.g. wrong Vercel URL), fail fast (5s)
             console.log("🌐 Intentando cargar poblaciones vía Proxy...");
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            const timeoutId = setTimeout(() => controller.abort(), 20000); // Increased to 20s for Cold Starts
 
             try {
                 const res = await fetch('/api/sampling_proxy?action=get_populations', { signal: controller.signal });

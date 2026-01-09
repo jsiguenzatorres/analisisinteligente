@@ -57,53 +57,72 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
 
             if (populationId) {
                 // ---------------------------------------------------------
-                // STRATEGY A: SERVER-SIDE SMART SAMPLING (RISK SCORING)
+                // UNIVERSAL SERVER-SIDE SAMPLING (Prevent Browser Freeze)
                 // ---------------------------------------------------------
-                // Optimization: If using Risk Scoring, let the DB sort and limit 
-                // to avoid fetching 20k rows to the browser just to sort them.
-                const isRiskScoring = appState.samplingMethod === SamplingMethod.NonStatistical &&
-                    appState.samplingParams.nonStatistical.selectedInsight === 'RiskScoring';
+                const useServerSide = appState.samplingMethod === SamplingMethod.NonStatistical ||
+                    appState.samplingMethod === SamplingMethod.Attribute;
 
-                if (isRiskScoring) {
-                    console.log("🚀 Step 3: Using SERVER-SIDE Smart Selection...");
-                    const targetSize = appState.samplingParams.nonStatistical.sampleSize || 30;
+                if (useServerSide) {
+                    console.log("🚀 Step 3: Executing SERVER-SIDE Sampling...");
 
-                    const res = await fetch(`/api/sampling_proxy?action=get_smart_sample&population_id=${populationId}&sample_size=${targetSize}`);
-                    if (!res.ok) throw new Error("Error en selección inteligente del servidor");
+                    let params: any = { sampleSize: 30 };
+
+                    if (appState.samplingMethod === SamplingMethod.NonStatistical) {
+                        params = {
+                            sampleSize: appState.samplingParams.nonStatistical.sampleSize || 30,
+                            insight: appState.samplingParams.nonStatistical.selectedInsight || 'Random'
+                        };
+                    } else if (appState.samplingMethod === SamplingMethod.Attribute) {
+                        params = {
+                            sampleSize: appState.samplingParams.attribute.sampleSize || 30
+                        };
+                    }
+
+                    const res = await fetch('/api/sampling_proxy?action=calculate_sample', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            population_id: populationId,
+                            method: appState.samplingMethod,
+                            params
+                        })
+                    });
+
+                    if (!res.ok) throw new Error("Error en muestreo (Server-Side)");
                     const { rows } = await res.json();
 
                     if (!rows || rows.length === 0) {
-                        alert("No se encontraron registros de alto riesgo.");
+                        alert("No se encontraron registros para la muestra.");
                         setLoading(false);
                         return;
                     }
 
-                    // Map Direct Response to Sample Format
-                    const smartSample = rows.map((r: any) => ({
+                    // Map Response
+                    const serverSample = rows.map((r: any) => ({
                         id: String(r.unique_id_col),
                         value: r.monetary_value_col || 0,
                         risk_score: r.risk_score,
                         risk_factors: r.risk_factors || [],
-                        risk_flag: 'ALTO RIESGO (DB)',
-                        risk_justification: `Selección Inteligente (Server-Side): Score ${r.risk_score}.`,
+                        risk_flag: r.risk_score > 0 ? 'RIESGO DETECTADO' : 'Muestreo Aleatorio',
+                        risk_justification: `Selección Servidor: ${appState.samplingMethod} (${params.insight || 'General'})`,
                         is_manual_selection: true,
                         raw_row: r.raw_json
                     }));
 
                     const results = {
-                        sampleSize: smartSample.length,
-                        sample: smartSample,
+                        sampleSize: serverSample.length,
+                        sample: serverSample,
                         totalErrorProjection: 0,
                         upperErrorLimit: 0,
                         findings: [],
-                        methodologyNotes: ["Muestreo Inteligente: Ejecutado directamente en motor de base de datos (Server-Side) por eficiencia."],
+                        methodologyNotes: ["Ejecución Server-Side para optimización de recursos."],
                         observations: appState.observations
                     };
 
                     setAppState(prev => ({ ...prev, results }));
                     setCurrentStep(Step.Results);
                     setLoading(false);
-                    return; // EXIT EARLY - Skip Client Side Logic
+                    return; // EXIT EARLY
                 }
 
 

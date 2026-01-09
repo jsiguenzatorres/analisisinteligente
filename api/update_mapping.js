@@ -22,10 +22,10 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const { id, column_mapping, advanced_analysis } = req.body;
+    const { id, column_mapping, advanced_analysis, ai_recommendation } = req.body;
 
-    if (!id || !column_mapping) {
-        return res.status(400).json({ error: 'Missing required fields (id, column_mapping)' });
+    if (!id) {
+        return res.status(400).json({ error: 'Missing required field: id' });
     }
 
     try {
@@ -35,12 +35,15 @@ export default async function handler(req, res) {
 
         const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+        // Construir objeto de actualización dinámicamente
+        const updates = {};
+        if (column_mapping) updates.column_mapping = column_mapping;
+        if (advanced_analysis) updates.advanced_analysis = advanced_analysis;
+        if (ai_recommendation) updates.ai_recommendation = ai_recommendation;
+
         const { data, error } = await supabase
             .from('audit_populations')
-            .update({
-                column_mapping,
-                advanced_analysis
-            })
+            .update(updates)
             .eq('id', id)
             .select()
             .single();

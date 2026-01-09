@@ -172,8 +172,8 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
             addLog(`⏩ Iniciando carga de ${data.length} filas vía Backend...`);
 
             // 2. Preparar y subir datos por lotes (Batching) - BACKEND PROXY
-            // Reducimos lote a 20 para evasión de firewall (Payload size & Timeouts)
-            const BATCH_SIZE = 20;
+            // Ajustamos lote a 50 para equilibrar payload vs cantidad de requests
+            const BATCH_SIZE = 50;
             const batches = [];
 
             for (let i = 0; i < data.length; i += BATCH_SIZE) {
@@ -183,7 +183,7 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                     monetary_value_col: hasMonetaryCols && mapping.monetaryValue ? parseMoney(row[mapping.monetaryValue]) : 0,
                     category_col: mapping.category ? String(row[mapping.category]) : null,
                     subcategory_col: mapping.subcategory ? String(row[mapping.subcategory]) : null,
-                    raw_json: row // Guardamos la fila original completa como JSON
+                    raw_json: row
                 }));
                 batches.push(chunk);
             }
@@ -194,7 +194,7 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
             let completedBatches = 0;
 
             for (const [idx, batch] of batches.entries()) {
-                addLog(`⏳ Subiendo lote ${idx + 1} de ${batches.length} (chunks)...`);
+                addLog(`⏳ Subiendo lote ${idx + 1} de ${batches.length} (${batch.length} filas)...`);
 
                 let batchSuccess = false;
                 let batchRetries = 0;
@@ -210,8 +210,6 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
 
                         if (!res.ok) {
                             const errText = await res.text();
-                            // If 504 Gateway Timeout, we might want to retry. If 400, probably not.
-                            // For safety, retry on everything except explicit 400s if possible, but simplicity first.
                             throw new Error(`Status ${res.status}: ${errText}`);
                         }
 
@@ -222,24 +220,21 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                         console.warn(`Batch ${idx + 1} failed (Attempt ${batchRetries}/${MAX_BATCH_RETRIES}). Retrying...`, batchErr);
 
                         if (batchRetries >= MAX_BATCH_RETRIES) {
-                            // If completely failed after retries, throw to main handler
                             throw new Error(`Fallo en lote ${idx + 1} tras ${MAX_BATCH_RETRIES} intentos: ${batchErr.message}`);
                         }
 
-                        // Exponential backoff: 1s, 2s, 4s
                         const waitTime = 1000 * Math.pow(2, batchRetries - 1);
                         addLog(`⚠️ Reintentando lote ${idx + 1} en ${waitTime / 1000}s...`);
                         await new Promise(resolve => setTimeout(resolve, waitTime));
                     }
                 }
 
-                // Success path
                 completedBatches++;
                 const progress = Math.round(((idx + 1) / batches.length) * 100);
                 setUploadProgress(progress);
 
-                // Pequeña pausa para no saturar el servidor/firewall (Throttle)
-                await new Promise(resolve => setTimeout(resolve, 300));
+                // Pausa de 800ms para evitar WAF/Rate Limiting (aprox 3750 filas/minuto)
+                await new Promise(resolve => setTimeout(resolve, 800));
             }
 
             // Validación final de conteo

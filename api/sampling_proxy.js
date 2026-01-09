@@ -44,11 +44,17 @@ export default async function handler(req, res) {
 
             if (action === 'get_universe') {
                 // LIGHT PAYLOAD LOGIC
-                // If detailed=true, include raw_json. Otherwise exclude it for performance.
-                const { detailed } = req.query;
-                const selectColumns = detailed === 'true'
-                    ? 'unique_id_col, monetary_value_col, risk_score, risk_factors, raw_json'
-                    : 'unique_id_col, monetary_value_col, risk_score, risk_factors';
+                // Optimization: Exclude 'risk_factors' (Text Array) by default to prevent Vercel 4.5MB Limit.
+                // Only unique_id, value, and risk_score are strictly needed for most algorithms.
+                const { detailed, include_factors } = req.query;
+
+                let selectColumns = 'unique_id_col, monetary_value_col, risk_score';
+
+                if (detailed === 'true') {
+                    selectColumns += ', risk_factors, raw_json';
+                } else if (include_factors === 'true') {
+                    selectColumns += ', risk_factors';
+                }
 
                 const { data, error } = await supabase
                     .from('audit_data_rows')
@@ -71,12 +77,7 @@ export default async function handler(req, res) {
                 const { data, error } = await supabase
                     .from('audit_results')
                     .select('results_json, population_id')
-                    .eq('population_id', population_id); // Filter by pop_id? Orig code didn't eq but it should probably
-                // Original code did NOT filter by population_id in get_all_results?
-                // Let's stick to previous behavior if possible, or safer to filter?
-                // Previous code: .select('results_json, population_id'); (No .eq)
-                // But if population_id IS provided, maybe we should filter?
-                // I will leave it as per previous code to avoid breaking change, but previously it was inside the population_id check block.
+                    .eq('population_id', population_id);
                 if (error) throw error;
                 return res.status(200).json({ results: data });
 
@@ -187,7 +188,8 @@ export default async function handler(req, res) {
                 if (!ids || !Array.isArray(ids)) return res.status(400).json({ error: 'Invalid IDs' });
                 const { data, error } = await supabase
                     .from('audit_data_rows')
-                    .select('unique_id_col, raw_json')
+                    // Now including risk_factors in hydration since we excluded it from universe
+                    .select('unique_id_col, raw_json, risk_factors')
                     .eq('population_id', population_id)
                     .in('unique_id_col', ids);
                 if (error) throw error;

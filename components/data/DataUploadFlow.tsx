@@ -196,36 +196,47 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
             for (const [idx, batch] of batches.entries()) {
                 addLog(`⏳ Subiendo lote ${idx + 1} de ${batches.length} (chunks)...`);
 
-                try {
-                    const res = await fetch('/api/sync_chunk', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ rows: batch })
-                    });
+                let batchSuccess = false;
+                let batchRetries = 0;
+                const MAX_BATCH_RETRIES = 3;
 
-                    if (!res.ok) {
-                        const errText = await res.text();
-                        console.error(`Error Batch ${idx + 1}:`, errText);
+                while (!batchSuccess && batchRetries < MAX_BATCH_RETRIES) {
+                    try {
+                        const res = await fetch('/api/sync_chunk', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ rows: batch })
+                        });
 
-                        // Si falla un lote, intentamos borrar la población para no dejar basura
-                        // (Opcional: se podría dejar para depuración, pero mejor limpiar)
-                        try {
-                            await supabase.from('audit_populations').delete().eq('id', populationId);
-                            addLog("❌ Error en carga. Se eliminó el registro parcial.");
-                        } catch (delErr) {
-                            console.error("Error cleanup:", delErr);
+                        if (!res.ok) {
+                            const errText = await res.text();
+                            // If 504 Gateway Timeout, we might want to retry. If 400, probably not.
+                            // For safety, retry on everything except explicit 400s if possible, but simplicity first.
+                            throw new Error(`Status ${res.status}: ${errText}`);
                         }
 
-                        throw new Error(`Fallo en lote ${idx + 1}: ${errText}`);
+                        batchSuccess = true;
+
+                    } catch (batchErr: any) {
+                        batchRetries++;
+                        console.warn(`Batch ${idx + 1} failed (Attempt ${batchRetries}/${MAX_BATCH_RETRIES}). Retrying...`, batchErr);
+
+                        if (batchRetries >= MAX_BATCH_RETRIES) {
+                            // If completely failed after retries, throw to main handler
+                            throw new Error(`Fallo en lote ${idx + 1} tras ${MAX_BATCH_RETRIES} intentos: ${batchErr.message}`);
+                        }
+
+                        // Exponential backoff: 1s, 2s, 4s
+                        const waitTime = 1000 * Math.pow(2, batchRetries - 1);
+                        addLog(`⚠️ Reintentando lote ${idx + 1} en ${waitTime / 1000}s...`);
+                        await new Promise(resolve => setTimeout(resolve, waitTime));
                     }
-
-                    completedBatches++;
-                    const progress = Math.round(((idx + 1) / batches.length) * 100);
-                    setUploadProgress(progress);
-
-                } catch (batchErr: any) {
-                    throw new Error(batchErr.message || "Error de red al subir lote");
                 }
+
+                // Success path
+                completedBatches++;
+                const progress = Math.round(((idx + 1) / batches.length) * 100);
+                setUploadProgress(progress);
 
                 // Pequeña pausa para no saturar el servidor/firewall (Throttle)
                 await new Promise(resolve => setTimeout(resolve, 300));

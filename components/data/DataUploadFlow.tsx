@@ -172,8 +172,8 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
             addLog(`⏩ Iniciando carga de ${data.length} filas vía Backend...`);
 
             // 2. Preparar y subir datos por lotes (Batching) - BACKEND PROXY
-            // Ajustamos lote a 100 para balancear velocidad y timeouts
-            const BATCH_SIZE = 100;
+            // Ajustamos lote a 25 para evitar Timeouts y errores de red
+            const BATCH_SIZE = 25;
             const batches = [];
 
             for (let i = 0; i < data.length; i += BATCH_SIZE) {

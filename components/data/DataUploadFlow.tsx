@@ -258,7 +258,7 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
     return (
         <div className="animate-fade-in space-y-6">
             <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold gradient-text">Carga de Población (Versión Estable)</h2>
+                <h2 className="text-2xl font-bold gradient-text">Carga de Población</h2>
                 <button onClick={onCancel} className="text-sm text-slate-400 hover:text-white">Cancelar</button>
             </div>
 

@@ -93,13 +93,11 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
         }
 
         try {
-            const { data: realRows, error: fetchError } = await supabase
-                .from('audit_data_rows')
-                .select('unique_id_col, monetary_value_col, raw_json')
-                .eq('population_id', appState.selectedPopulation.id)
-                .limit(10000);
+            // Use Proxy for fetching data (Bypass Firewall)
+            const res = await fetch(`/api/get_universe?population_id=${appState.selectedPopulation.id}`);
+            if (!res.ok) throw new Error('Failed to fetch population data via proxy');
 
-            if (fetchError) throw fetchError;
+            const { rows: realRows } = await res.json();
 
             // Use updated appState with manualAllocations if applicable
             const currentAppState = manualAllocations ? {

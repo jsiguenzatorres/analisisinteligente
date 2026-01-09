@@ -28,9 +28,10 @@ const AdminUserManagementView: React.FC = () => {
                 console.log("Admin: Iniciando carga de usuarios vía Proxy...");
 
                 // Fetch via Proxy to bypass firewall
-                const res = await fetch('/api/admin_get_users');
+                const res = await fetch('/api/sampling_proxy?action=get_users');
                 if (!res.ok) {
-                    throw new Error('Error fetching users via proxy: ' + res.statusText);
+                    const errText = await res.text();
+                    throw new Error(`Error fetching users (${res.status}): ${errText}`);
                 }
 
                 const { users: data } = await res.json();
@@ -55,12 +56,19 @@ const AdminUserManagementView: React.FC = () => {
     const toggleUserStatus = async (userId: string, currentStatus: boolean) => {
         try {
             setActionLoading(userId);
-            const { error } = await supabase
-                .from('profiles')
-                .update({ is_active: !currentStatus })
-                .eq('id', userId);
 
-            if (error) throw error;
+            // Proxy Call
+            const res = await fetch('/api/sampling_proxy?action=toggle_user_status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, status: !currentStatus })
+            });
+
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`Proxy error (${res.status}): ${errText}`);
+            }
+
             setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_active: !currentStatus } : u));
         } catch (err) {
             console.error("Error updating user status:", err);

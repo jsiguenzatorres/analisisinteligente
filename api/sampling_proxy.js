@@ -62,6 +62,12 @@ export default async function handler(req, res) {
                 if (error) throw error;
                 return res.status(200).json({ results: data });
 
+            } else if (action === 'get_users') {
+                // Requires service_role key (which we have)
+                const { data: { users }, error } = await supabase.auth.admin.listUsers();
+                if (error) throw error;
+                return res.status(200).json({ users });
+
             } else {
                 return res.status(400).json({ error: 'Invalid GET action' });
             }
@@ -119,6 +125,32 @@ export default async function handler(req, res) {
 
                 if (error) throw error;
                 return res.status(200).json(data);
+
+            } else if (action === 'delete_population') {
+                const { population_id } = req.body;
+                if (!population_id) return res.status(400).json({ error: 'Missing population_id' });
+
+                const { error } = await supabase
+                    .from('audit_populations')
+                    .delete()
+                    .eq('id', population_id);
+
+                if (error) throw error;
+                return res.status(200).json({ success: true });
+
+            } else if (action === 'toggle_user_status') {
+                const { user_id, status } = req.body;
+                if (!user_id || typeof status === 'undefined') return res.status(400).json({ error: 'Missing user_id or status' });
+
+                // Requires service_role key to bypass RLS or admin privileges
+                const { data, error } = await supabase
+                    .from('profiles')
+                    .update({ is_active: status })
+                    .eq('id', user_id)
+                    .select();
+
+                if (error) throw error;
+                return res.status(200).json({ data });
 
             } else {
                 return res.status(400).json({ error: 'Invalid POST action' });

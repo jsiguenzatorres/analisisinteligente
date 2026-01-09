@@ -36,32 +36,17 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
         setLoading(true);
         setError(null);
         try {
-            // Attempt 1: Try Proxy (Firewall Bypass)
-            console.log("Attempting Proxy Fetch...");
-            const res = await fetch('/api/get_populations');
+            // Use Centralized Proxy (Bypass Firewall)
+            const res = await fetch('/api/sampling_proxy?action=get_populations');
             if (res.ok) {
                 const { populations: data } = await res.json();
                 setPopulations(data || []);
-                return; // Success
+            } else {
+                throw new Error('Error de conexión con el servidor (Proxy)');
             }
-            throw new Error('Proxy fetch failed with status: ' + res.status);
-        } catch (proxyErr) {
-            console.warn("Proxy Fetch Failed, trying Direct Fallback:", proxyErr);
-
-            // Attempt 2: Direct Supabase Fetch (Fallback)
-            try {
-                const { data, error } = await supabase
-                    .from('audit_populations')
-                    .select('*')
-                    .order('created_at', { ascending: false });
-
-                if (error) throw error;
-                setPopulations(data as AuditPopulation[]);
-
-            } catch (directErr: any) {
-                console.error("All fetch methods failed:", directErr);
-                setError('No se pudieron cargar los proyectos. (Proxy & Direct Fail).');
-            }
+        } catch (err: any) {
+            console.error("Dashboard Fetch Failed:", err);
+            setError('No se pudieron cargar los proyectos. Intente recargar.');
         } finally {
             setLoading(false);
         }
@@ -73,8 +58,13 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
         setDeleteConfirm(null);
 
         try {
-            // Use Proxy to bypass Firewall
-            const res = await fetch(`/api/delete_population?id=${id}`, { method: 'DELETE' });
+            // Use Centralized Proxy for Deletion
+            const res = await fetch('/api/sampling_proxy?action=delete_population', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ population_id: id })
+            });
+
             if (!res.ok) {
                 const errData = await res.json();
                 throw new Error(errData.error || 'Error deleting via proxy');
@@ -108,13 +98,22 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
                     <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Gestor de Poblaciones</h2>
                     <p className="text-slate-500 mt-1 text-lg">Seleccione un universo de datos o cargue un nuevo archivo para auditar.</p>
                 </div>
-                <button
-                    onClick={onAddNew}
-                    className="group relative inline-flex items-center justify-center px-6 py-3 border border-transparent text-sm font-bold rounded-lg text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg hover:shadow-xl transform transition-all duration-200 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 uppercase tracking-wide"
-                >
-                    <i className="fas fa-cloud-upload-alt mr-2 text-lg group-hover:animate-bounce"></i>
-                    Cargar Nueva Población
-                </button>
+                <div className="flex gap-3">
+                    <button
+                        onClick={fetchPopulations}
+                        className="p-3 bg-white border border-slate-200 text-slate-400 rounded-lg hover:text-indigo-600 hover:border-indigo-400 transition-all shadow-sm"
+                        title="Recargar Lista"
+                    >
+                        <i className={`fas fa-sync-alt ${loading ? 'fa-spin' : ''}`}></i>
+                    </button>
+                    <button
+                        onClick={onAddNew}
+                        className="group relative inline-flex items-center justify-center px-6 py-3 border border-transparent text-sm font-bold rounded-lg text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg hover:shadow-xl transform transition-all duration-200 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 uppercase tracking-wide"
+                    >
+                        <i className="fas fa-cloud-upload-alt mr-2 text-lg group-hover:animate-bounce"></i>
+                        Cargar Nueva Población
+                    </button>
+                </div>
             </div>
 
             <Card className="bg-white border-t-4 border-t-blue-500">

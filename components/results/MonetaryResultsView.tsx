@@ -107,7 +107,10 @@ const MonetaryResultsView: React.FC<Props> = ({ appState, setAppState, role, onB
                 })
             });
 
-            if (!saveRes.ok) throw new Error('Failed to save work in progress via proxy');
+            if (!saveRes.ok) {
+                const errText = await saveRes.text();
+                throw new Error(`Proxy Save Failed (${saveRes.status}): ${errText}`);
+            }
 
             // Actualizamos el estado global con el nuevo storage para que App.tsx esté sincronizado
             setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
@@ -117,7 +120,8 @@ const MonetaryResultsView: React.FC<Props> = ({ appState, setAppState, role, onB
             }
         } catch (err: any) {
             console.error("Exception saving to DB:", err);
-            if (!silent) setSaveFeedback({ show: true, title: "Error Crítico", message: "Falla de red o servidor.", type: 'error' });
+            const errMsg = err.message || "Falla desconocida";
+            if (!silent) setSaveFeedback({ show: true, title: "Error Guardando", message: errMsg, type: 'error' });
         } finally {
             setIsSaving(false);
         }

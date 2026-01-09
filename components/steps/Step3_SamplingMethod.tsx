@@ -50,6 +50,10 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
     };
 
     const handleRunSampling = async () => {
+        // DEBUG: PROBAR SI SE ACTUALIZÓ
+        // alert("DEBUG: MODO SERVER-SIDE ACTIVO v2"); 
+        // Comentado para producción limpio, pero descomentar si persiste la duda
+        console.log("Starting Sampling...");
         setLoading(true);
         try {
             let realRows: any[] = [];

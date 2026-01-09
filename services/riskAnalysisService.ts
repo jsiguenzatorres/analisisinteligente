@@ -1,20 +1,5 @@
 
-import { AuditPopulation, RiskProfile, RiskAnalysisResult } from '../types';
-
-export interface AdvancedAnalysis {
-    eda: {
-        totalValue: number;
-        recordCount: number;
-        averageValue: number;
-        maxValue: number;
-        minValue: number;
-        negativeCount: number;
-        zeroCount: number;
-        benfordScore: number;
-    };
-    forensicDiscovery: string[];
-    riskBreakdown: any[];
-}
+import { AuditPopulation, RiskProfile, RiskAnalysisResult, AdvancedAnalysis, EdaMetrics, BenfordAnalysis } from '../types';
 
 const BENFORD_PROBABILITIES = [30.1, 17.6, 12.5, 9.7, 7.9, 6.7, 5.8, 5.1, 4.6];
 
@@ -70,7 +55,7 @@ export function parseCurrency(value: any): number {
     return isNaN(num) ? 0 : num;
 }
 
-export const performRiskProfiling = (rows: any[], population: AuditPopulation) => {
+export const performRiskProfiling = (rows: any[], population: AuditPopulation): RiskAnalysisResult => {
     const riskCriteria = {
         highValueConfig: 10000, // Umbral por defecto
         suspiciousTimeStart: 20, // 8 PM
@@ -80,8 +65,6 @@ export const performRiskProfiling = (rows: any[], population: AuditPopulation) =
     const mapping = population.column_mapping || {} as any;
     const monetaryValue = mapping.monetaryValue;
     const dateCol = mapping.date;
-    const categoryCol = mapping.category;
-    const userCol = mapping.user;
     const vendorCol = mapping.vendor;
 
     let totalRiskScore = 0; // Suma acumulada de scores
@@ -211,19 +194,54 @@ export const performRiskProfiling = (rows: any[], population: AuditPopulation) =
         benfordDev /= 9;
     }
 
+    // Construct proper Benford Analysis Array
+    const benfordAnalysis: BenfordAnalysis[] = new Array(9).fill(0).map((_, i) => {
+        const d = i + 1;
+        const totalLeading = values.filter(v => v !== 0).length;
+        const observedFreq = totalLeading > 0 ? (digitCounts[d] / totalLeading) * 100 : 0;
+        const expectedFreq = BENFORD_PROBABILITIES[d - 1];
+
+        return {
+            digit: d,
+            expectedFreq,
+            actualFreq: observedFreq,
+            actualCount: digitCounts[d],
+            isSuspicious: Math.abs(observedFreq - expectedFreq) > 5 // Simple threshold
+        };
+    });
+
+    const edaMetrics: EdaMetrics = {
+        netValue: absSum,
+        absoluteValue: absSum,
+        totalRecords: correctDataCount,
+        zerosCount: zeroCount,
+        positiveValue: 0,
+        negativeValue: 0,
+        positiveCount: 0,
+        negativeCount: negativeCount,
+        errorDataCount,
+        correctDataCount,
+        meanValue: averageValue,
+        minValue: min,
+        maxValue: max,
+        sampleStdDev: 0,
+        sampleVariance: 0,
+        populationStdDev: 0,
+        populationVariance: 0,
+        skewness: 0,
+        kurtosis: 0
+    };
+
     const advancedAnalysis: AdvancedAnalysis = {
-        eda: {
-            totalValue: absSum,
-            recordCount: correctDataCount,
-            averageValue,
-            maxValue: max,
-            minValue: min,
-            negativeCount,
-            zeroCount,
-            benfordScore: benfordDev
-        },
+        benford: benfordAnalysis,
+        outliersCount: updatedRows.filter(r => r.risk_factors?.includes('STATISTICAL_OUTLIER')).length,
+        outliersThreshold: riskCriteria.highValueConfig * 5,
+        duplicatesCount: 0,
+        zerosCount: zeroCount,
+        negativesCount: negativeCount,
+        roundNumbersCount: updatedRows.filter(r => r.risk_factors?.includes('ROUND_AMOUNT')).length,
         forensicDiscovery: population.advanced_analysis?.forensicDiscovery || [],
-        riskBreakdown: [] // Todo: breakdown by factor
+        eda: edaMetrics
     };
 
     return {

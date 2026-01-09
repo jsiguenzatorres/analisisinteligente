@@ -48,10 +48,12 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ userName, onNavigate, onL
         return 'EN PROGRESO';
     };
 
+    const [refreshTrigger, setRefreshTrigger] = useState(0);
+    const [loadError, setLoadError] = useState<string | null>(null);
+
     useEffect(() => {
         let isMounted = true;
         const fetchData = async () => {
-            // Si no hay usuario, no intentamos fetch para evitar bloqueo por RLS
             if (!user) {
                 console.warn("⚠️ MainDashboard: Usuario no identificado. Esperando sesión...");
                 setLoading(false);
@@ -60,43 +62,42 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ userName, onNavigate, onL
 
             if (!isMounted) return;
             setLoading(true);
+            setLoadError(null);
 
             const timeout = setTimeout(() => {
                 if (isMounted && loading) {
                     console.warn("⚠️ Dashboard: Fetch timeout reached.");
                     setLoading(false);
+                    setLoadError("Tiempo de espera agotado. Intente recargar.");
                 }
-            }, 8000);
+            }, 12000);
 
             try {
-                console.log("📊 Dashboard: Sincronizando datos para usuario:", user.id);
+                // FETCH VIA PROXY (Bypass Firewall)
+                const headers = { 'Content-Type': 'application/json' };
 
-                const { data: popData, error: popError } = await supabase
-                    .from('audit_populations')
-                    .select('*')
-                    .order('created_at', { ascending: false });
+                // 1. Get Populations
+                const popRes = await fetch('/api/sampling_proxy?action=get_populations');
+                if (!popRes.ok) throw new Error('Error cargando proyectos (Proxy)');
+                const { populations: popData } = await popRes.json();
 
-                if (popError) console.error("❌ Dashboard: Error en popData:", popError.message);
-
-                const { data: resultsData, error: resultsError } = await supabase
-                    .from('audit_results')
-                    .select('results_json, population_id');
-
-                if (resultsError) console.error("❌ Dashboard: Error en resultsData:", resultsError.message);
+                // 2. Get Results Stats
+                const resultsRes = await fetch('/api/sampling_proxy?action=get_all_results');
+                if (!resultsRes.ok) throw new Error('Error cargando estadísticas (Proxy)');
+                const { results: resultsData } = await resultsRes.json();
 
                 if (isMounted && popData) {
-                    console.log("✅ Dashboard: Recibidos", popData.length, "proyectos.");
                     setAllProjects(popData);
                     setRecentProjects(popData.slice(0, 5));
 
                     let completed = 0;
                     let inProgress = 0;
-                    popData.forEach(p => {
+                    popData.forEach((p: any) => {
                         if (normalizeStatus(p.status) === 'FINALIZADO') completed++;
                         else inProgress++;
                     });
 
-                    const fraudAlerts = popData.reduce((acc, p) => {
+                    const fraudAlerts = popData.reduce((acc: number, p: any) => {
                         return acc + (p.advanced_analysis?.outliersCount || 0);
                     }, 0);
 
@@ -105,7 +106,7 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ userName, onNavigate, onL
 
                     if (resultsData) {
                         setAllResults(resultsData);
-                        resultsData.forEach(res => {
+                        resultsData.forEach((res: any) => {
                             const json = res.results_json as any;
                             if (json) {
                                 if (Array.isArray(json.findings)) findingsCount += json.findings.length;
@@ -122,8 +123,9 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ userName, onNavigate, onL
                         alertasFraude: fraudAlerts
                     });
                 }
-            } catch (error) {
+            } catch (error: any) {
                 console.error("💥 Dashboard: Fallo crítico en fetch:", error);
+                if (isMounted) setLoadError(error.message || "Error de conexión");
             } finally {
                 if (isMounted) {
                     clearTimeout(timeout);
@@ -134,7 +136,9 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ userName, onNavigate, onL
 
         fetchData();
         return () => { isMounted = false; };
-    }, []); // El array vacío asegura que solo se ejecute al montar
+    }, [user, refreshTrigger]); // Refresh trigger re-runs fetch
+
+    // ... (rest of component) ...
 
     const handleDeleteProject = async (projectId: string, e: React.MouseEvent) => {
         e.stopPropagation();
@@ -257,11 +261,19 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ userName, onNavigate, onL
                     <h2 className="text-3xl font-black text-slate-900 tracking-tight mb-2">
                         Bienvenido de nuevo, <span className="text-indigo-600">{userName}</span>.
                     </h2>
-                    <p className="text-slate-500 font-medium">
+                    <p className="text-slate-500 font-medium flex items-center gap-2">
                         Tu equipo de auditoría ha detectado <span className="text-indigo-600 font-extrabold">{stats.totalHallazgos} hallazgos</span> en el ciclo actual.
+                        {loading && <i className="fas fa-circle-notch fa-spin text-indigo-400"></i>}
                     </p>
                 </div>
                 <div className="flex gap-4">
+                    <button
+                        onClick={() => setRefreshTrigger(prev => prev + 1)}
+                        className="px-4 py-4 bg-white text-slate-400 border border-slate-200 rounded-2xl font-black text-xs uppercase tracking-widest hover:border-indigo-400 hover:text-indigo-600 transition-all shadow-sm flex items-center gap-2"
+                        title="Recargar Datos"
+                    >
+                        <i className={`fas fa-sync-alt ${loading ? 'fa-spin' : ''}`}></i>
+                    </button>
                     <button onClick={() => onNavigate('data_upload')} className="px-6 py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-3">
                         <i className="fas fa-plus text-sm"></i> Nuevo Proyecto
                     </button>
@@ -270,6 +282,22 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ userName, onNavigate, onL
                     </button>
                 </div>
             </div>
+
+            {/* Error Banner */}
+            {loadError && (
+                <div className="bg-rose-50 border border-rose-100 p-4 rounded-xl flex items-center justify-between animate-pulse">
+                    <div className="flex items-center gap-3 text-rose-600">
+                        <i className="fas fa-exclamation-circle text-xl"></i>
+                        <span className="text-xs font-bold uppercase tracking-wide">{loadError}</span>
+                    </div>
+                    <button
+                        onClick={() => setRefreshTrigger(prev => prev + 1)}
+                        className="px-4 py-2 bg-rose-100 text-rose-700 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-rose-200 transition-colors"
+                    >
+                        Reintentar
+                    </button>
+                </div>
+            )}
 
             {/* ZONA B: KPI CARDS */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

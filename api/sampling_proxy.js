@@ -46,6 +46,22 @@ export default async function handler(req, res) {
                     .order('created_at', { ascending: false });
                 if (error) throw error;
                 return res.status(200).json({ history: data });
+
+            } else if (action === 'get_populations') {
+                const { data, error } = await supabase
+                    .from('audit_populations')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+                if (error) throw error;
+                return res.status(200).json({ populations: data });
+
+            } else if (action === 'get_all_results') {
+                const { data, error } = await supabase
+                    .from('audit_results')
+                    .select('results_json, population_id');
+                if (error) throw error;
+                return res.status(200).json({ results: data });
+
             } else {
                 return res.status(400).json({ error: 'Invalid GET action' });
             }

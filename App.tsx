@@ -88,14 +88,15 @@ const AuthenticatedApp: React.FC = () => {
     const handlePopulationSelected = async (population: AuditPopulation) => {
         try {
             console.log("🔍 Cargando población:", population.id);
-            const { data: existingResults, error: fetchError } = await supabase
-                .from('audit_results')
-                .select('results_json')
-                .eq('population_id', population.id)
-                .maybeSingle();
+            // Use Proxy for Fetching Results to Bypass Firewall
+            const res = await fetch(`/api/get_audit_results?population_id=${population.id}`);
+            let existingResults = null;
 
-            if (fetchError) {
-                console.error("❌ Error recuperando datos de Supabase:", fetchError);
+            if (res.ok) {
+                const { data } = await res.json();
+                existingResults = data;
+            } else {
+                console.warn("⚠️ Failed to fetch results via proxy", await res.text());
             }
 
             const rawJson = existingResults?.results_json as any;

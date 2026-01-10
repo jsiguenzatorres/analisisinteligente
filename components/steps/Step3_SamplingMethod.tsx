@@ -63,6 +63,10 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
                 const useServerSide = appState.samplingMethod === SamplingMethod.NonStatistical ||
                     appState.samplingMethod === SamplingMethod.Attribute;
 
+                console.log("🔍 DEBUG: samplingMethod =", appState.samplingMethod);
+                console.log("🔍 DEBUG: SamplingMethod.NonStatistical =", SamplingMethod.NonStatistical);
+                console.log("🔍 DEBUG: useServerSide =", useServerSide);
+
                 if (useServerSide) {
                     console.log("🚀 Step 3: Executing SERVER-SIDE Sampling...");
 

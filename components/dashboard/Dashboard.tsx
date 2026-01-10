@@ -163,7 +163,10 @@ const Dashboard: React.FC<Props> = ({ onMethodSelect, population, onNavigate }) 
             )}
 
             <div className="mb-8">
-                <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight mb-2">Panel de Control de Muestreo</h2>
+                <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight mb-2">
+                    Panel de Control de Muestreo
+                    <span className="ml-3 text-lg font-black text-emerald-500 bg-emerald-50 px-3 py-1 rounded-lg border-2 border-emerald-500">[v2.5 DEPLOYED ✓]</span>
+                </h2>
                 <p className="text-slate-500 text-lg">Seleccione un método estadístico para iniciar su prueba de auditoría.</p>
             </div>
 

@@ -97,23 +97,23 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                 last_method: appState.samplingMethod
             };
 
-            const { error } = await supabase
-                .from('audit_results')
-                .upsert({
+            // SERVER-SIDE SAVE (Prevent Browser Freeze)
+            const res = await fetch('/api/sampling_proxy?action=save_work_in_progress', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
                     population_id: appState.selectedPopulation.id,
                     results_json: updatedStorage,
-                    sample_size: updatedResults.sampleSize,
-                    updated_at: new Date().toISOString()
-                }, { onConflict: 'population_id' });
+                    sample_size: updatedResults.sampleSize
+                })
+            });
 
-            if (error) {
-                setSaveFeedback({ show: true, title: "Error", message: error.message, type: 'error' });
-            } else {
-                setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
-                if (!silent) setSaveFeedback({ show: true, title: "Sincronizado", message: "Papel de trabajo actualizado.", type: 'success' });
-            }
+            if (!res.ok) throw new Error('Error al guardar');
+
+            setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
+            if (!silent) setSaveFeedback({ show: true, title: "Sincronizado", message: "Papel de trabajo actualizado.", type: 'success' });
         } catch (err: any) {
-            if (!silent) setSaveFeedback({ show: true, title: "Error", message: "Falla de red.", type: 'error' });
+            if (!silent) setSaveFeedback({ show: true, title: "Error", message: err.message || "Falla de red.", type: 'error' });
         } finally {
             setIsSaving(false);
         }

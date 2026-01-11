@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 // v2.5.1 - Debug logs for samplingMethod condition
+// Last deploy: 2026-01-10 20:10 UTC
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 

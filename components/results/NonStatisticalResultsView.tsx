@@ -85,8 +85,15 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
         if (!appState.selectedPopulation?.id) return;
         setIsSaving(true);
         try {
+            // OPTIMIZE: Remove raw_row from sample to reduce payload size (raw_row is already in audit_data_rows)
+            const optimizedSample = (updatedResults.sample || []).map(item => {
+                const { raw_row, ...rest } = item;
+                return rest;
+            });
+
             const currentMethodResults = {
                 ...updatedResults,
+                sample: optimizedSample,
                 method: appState.samplingMethod,
                 sampling_params: appState.samplingParams
             };
@@ -97,7 +104,7 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                 last_method: appState.samplingMethod
             };
 
-            // TEMPORARY: Back to client-side until server endpoint is fixed
+            // Client-side save (optimized payload)
             const { error } = await supabase
                 .from('audit_results')
                 .upsert({

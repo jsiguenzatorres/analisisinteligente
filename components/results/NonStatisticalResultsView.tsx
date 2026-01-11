@@ -124,25 +124,24 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
         setIsExpanding(true);
         try {
             const amountToFetch = expansionMetrics.recommendedExpansion;
-
-            // Lógica de expansión: Buscar los siguientes con mayor riesgo que no estén en la muestra
             const existingIds = currentResults.sample.map(i => i.id);
 
-            let query = supabase
-                .from('audit_data_rows')
-                .select('*')
-                .eq('population_id', appState.selectedPopulation.id)
-                .not('unique_id_col', 'in', `(${existingIds.map(id => `'${id}'`).join(',')})`)
-                .order('risk_score', { ascending: false })
-                .limit(amountToFetch);
+            // SERVER-SIDE EXPANSION (Prevent Browser Freeze)
+            const res = await fetch('/api/sampling_proxy?action=expand_sample', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    population_id: appState.selectedPopulation.id,
+                    existing_ids: existingIds,
+                    amount: amountToFetch
+                })
+            });
 
-            const { data: newRows, error } = await query;
-
-            if (error) throw error;
+            if (!res.ok) throw new Error('Error al ampliar muestra');
+            const { rows: newRows } = await res.json();
 
             if (newRows && newRows.length > 0) {
-                const mapping = appState.selectedPopulation.column_mapping;
-                const newItems: AuditSampleItem[] = newRows.map((r, i) => ({
+                const newItems: AuditSampleItem[] = newRows.map((r: any) => ({
                     id: String(r.unique_id_col),
                     value: r.monetary_value_col || 0,
                     risk_score: r.risk_score,

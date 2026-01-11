@@ -255,6 +255,26 @@ export default async function handler(req, res) {
                 if (error) throw error;
                 return res.status(200).json({ rows: data });
 
+            } else if (action === 'expand_sample') {
+                // SERVER-SIDE SAMPLE EXPANSION (Prevent Browser Freeze)
+                const { population_id, existing_ids, amount } = JSON.parse(body);
+
+                if (!population_id || !existing_ids || !amount) {
+                    return res.status(400).json({ error: 'Missing required fields' });
+                }
+
+                // Query for additional rows NOT in existing sample, ordered by risk_score descending
+                const { data, error } = await supabase
+                    .from('audit_data_rows')
+                    .select('unique_id_col, monetary_value_col, risk_score, risk_factors, raw_json')
+                    .eq('population_id', population_id)
+                    .not('unique_id_col', 'in', `(${existing_ids.map(id => `"${id}"`).join(',')})`)
+                    .order('risk_score', { ascending: false })
+                    .limit(parseInt(amount) || 15);
+
+                if (error) throw error;
+                return res.status(200).json({ rows: data });
+
             } else {
                 return res.status(400).json({ error: 'Invalid POST action' });
             }

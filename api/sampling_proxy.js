@@ -148,17 +148,40 @@ export default async function handler(req, res) {
                 return res.status(200).json(data);
 
             } else if (action === 'save_work_in_progress') {
+                console.log('📝 save_work_in_progress called');
                 const { population_id, results_json, sample_size } = req.body;
-                if (!population_id || !results_json) return res.status(400).json({ error: 'Missing required fields' });
+                console.log('Population ID:', population_id);
+                console.log('Results JSON type:', typeof results_json);
+                console.log('Sample size:', sample_size);
 
-                const { data, error } = await supabase
-                    .from('audit_results')
-                    .upsert({
-                        population_id, results_json, sample_size, updated_at: new Date().toISOString()
-                    }, { onConflict: 'population_id' })
-                    .select();
-                if (error) throw error;
-                return res.status(200).json(data);
+                if (!population_id || !results_json) {
+                    console.error('Missing fields - population_id:', !!population_id, 'results_json:', !!results_json);
+                    return res.status(400).json({ error: 'Missing required fields' });
+                }
+
+                try {
+                    const { data, error } = await supabase
+                        .from('audit_results')
+                        .upsert({
+                            population_id,
+                            results_json,
+                            sample_size,
+                            updated_at: new Date().toISOString()
+                        }, { onConflict: 'population_id' })
+                        .select();
+
+                    if (error) {
+                        console.error('Supabase upsert error:', error);
+                        throw error;
+                    }
+
+                    console.log('✅ Save successful');
+                    return res.status(200).json(data);
+                } catch (upsertError) {
+                    console.error('Upsert exception:', upsertError);
+                    throw upsertError;
+                }
+
 
             } else if (action === 'delete_population') {
                 const { population_id } = req.body;

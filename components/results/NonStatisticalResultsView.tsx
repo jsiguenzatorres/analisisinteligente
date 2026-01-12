@@ -82,7 +82,9 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
     const canExpand = errorsFound > 0 && expansionMetrics.recommendedExpansion > 0 && currentResults.sampleSize < totalRows;
 
     const saveToDb = async (updatedResults: AuditResults, silent = true) => {
-        console.log('🔵 [SAVE] Starting saveToDb...');
+        // DEBUG: Alert to confirm code is running (Vercel deployment check)
+        if (!silent) alert("🔵 INICIANDO GUARDADO - CÓDIGO ACTUALIZADO v2.5.3");
+
         if (!appState.selectedPopulation?.id) {
             console.log('🔴 [SAVE] No population selected, exiting');
             return;

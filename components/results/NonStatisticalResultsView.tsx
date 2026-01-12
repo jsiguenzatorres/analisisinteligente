@@ -82,15 +82,23 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
     const canExpand = errorsFound > 0 && expansionMetrics.recommendedExpansion > 0 && currentResults.sampleSize < totalRows;
 
     const saveToDb = async (updatedResults: AuditResults, silent = true) => {
-        if (!appState.selectedPopulation?.id) return;
+        console.log('🔵 [SAVE] Starting saveToDb...');
+        if (!appState.selectedPopulation?.id) {
+            console.log('🔴 [SAVE] No population selected, exiting');
+            return;
+        }
+        console.log('🔵 [SAVE] Population ID:', appState.selectedPopulation.id);
         setIsSaving(true);
         try {
+            console.log('🔵 [SAVE] Optimizing sample (removing raw_row)...');
             // OPTIMIZE: Remove raw_row from sample to reduce payload size (raw_row is already in audit_data_rows)
             const optimizedSample = (updatedResults.sample || []).map(item => {
                 const { raw_row, ...rest } = item;
                 return rest;
             });
+            console.log('🔵 [SAVE] Optimized sample size:', optimizedSample.length);
 
+            console.log('🔵 [SAVE] Building currentMethodResults...');
             const currentMethodResults = {
                 ...updatedResults,
                 sample: optimizedSample,
@@ -98,12 +106,15 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                 sampling_params: appState.samplingParams
             };
 
+            console.log('🔵 [SAVE] Building updatedStorage...');
             const updatedStorage = {
                 ...(appState.full_results_storage || {}),
                 [appState.samplingMethod]: currentMethodResults,
                 last_method: appState.samplingMethod
             };
+            console.log('🔵 [SAVE] Storage keys:', Object.keys(updatedStorage));
 
+            console.log('🔵 [SAVE] Calling Supabase upsert...');
             // Client-side save (optimized payload)
             const { error } = await supabase
                 .from('audit_results')
@@ -114,15 +125,20 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                     updated_at: new Date().toISOString()
                 }, { onConflict: 'population_id' });
 
+            console.log('🔵 [SAVE] Upsert completed');
             if (error) {
+                console.error('🔴 [SAVE] Upsert error:', error);
                 setSaveFeedback({ show: true, title: "Error", message: error.message, type: 'error' });
             } else {
+                console.log('✅ [SAVE] Save successful!');
                 setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
                 if (!silent) setSaveFeedback({ show: true, title: "Sincronizado", message: "Papel de trabajo actualizado.", type: 'success' });
             }
         } catch (err: any) {
+            console.error('🔴 [SAVE] Exception:', err);
             if (!silent) setSaveFeedback({ show: true, title: "Error", message: err.message || "Falla de red.", type: 'error' });
         } finally {
+            console.log('🔵 [SAVE] Cleanup (setIsSaving false)');
             setIsSaving(false);
         }
     };

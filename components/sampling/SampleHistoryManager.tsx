@@ -9,13 +9,21 @@ interface Props {
     onBack: () => void;
 }
 
+
 const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onBack }) => {
     const [history, setHistory] = useState<HistoricalSample[]>([]);
     const [loading, setLoading] = useState(true);
+    const fetchAttemptedRef = React.useRef(false);
 
     useEffect(() => {
+        // Prevent infinite retries
+        if (fetchAttemptedRef.current) {
+            return;
+        }
+
         const fetchHistory = async () => {
             setLoading(true);
+            fetchAttemptedRef.current = true;
             try {
                 // Use Proxy to bypass firewall
                 console.log("🌐 Intentando cargar historial vía Proxy...");

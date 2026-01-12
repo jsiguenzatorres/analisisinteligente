@@ -82,9 +82,16 @@ const MonetaryResultsView: React.FC<Props> = ({ appState, setAppState, role, onB
         if (!appState.selectedPopulation?.id) return;
         setIsSaving(true);
         try {
+            // OPTIMIZE: Remove raw_row from sample to reduce payload size
+            const optimizedSample = (updatedResults.sample || []).map(item => {
+                const { raw_row, ...rest } = item;
+                return rest;
+            });
+
             // Snapshot del método actual
             const currentMethodResults = {
                 ...updatedResults,
+                sample: optimizedSample,
                 method: appState.samplingMethod,
                 sampling_params: appState.samplingParams
             };

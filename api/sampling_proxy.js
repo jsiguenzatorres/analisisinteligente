@@ -38,6 +38,21 @@ export default async function handler(req, res) {
                     .order('created_at', { ascending: false });
                 if (error) throw error;
                 return res.status(200).json({ populations: data });
+
+            } else if (action === 'get_all_results') {
+                // Modified to be optional population_id
+                const { population_id } = req.query;
+                let query = supabase
+                    .from('audit_results')
+                    .select('results_json, population_id');
+
+                if (population_id) {
+                    query = query.eq('population_id', population_id);
+                }
+
+                const { data, error } = await query;
+                if (error) throw error;
+                return res.status(200).json({ results: data });
             }
 
             // Actions requiring population_id
@@ -90,14 +105,6 @@ export default async function handler(req, res) {
                     .order('created_at', { ascending: false });
                 if (error) throw error;
                 return res.status(200).json({ history: data });
-
-            } else if (action === 'get_all_results') {
-                const { data, error } = await supabase
-                    .from('audit_results')
-                    .select('results_json, population_id')
-                    .eq('population_id', population_id);
-                if (error) throw error;
-                return res.status(200).json({ results: data });
 
             } else if (action === 'get_observations') {
                 const { data, error } = await supabase
@@ -270,7 +277,8 @@ export default async function handler(req, res) {
                     }
                 } else if (method === 'Attribute') {
                     // Random Selection
-                    // heuristic: order by unique_id_col
+                    // heuristic: order by unique_id_col (Detailed Randomness not needed for Attribute usually, just Selection)
+                    query = query.order('unique_id_col', { ascending: true });
                 }
 
                 // EXECUTE QUERY

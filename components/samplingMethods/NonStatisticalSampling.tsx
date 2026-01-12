@@ -184,37 +184,66 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     query = query.gt('monetary_value_col', threshold);
                     break;
                 case 'Duplicates':
-                    query = query.not('risk_factors', 'is', null).like('risk_factors', '%Duplicado%');
+                    // Use contains for JSONB array check
+                    query = query.contains('risk_factors', ['Duplicado']);
                     break;
                 case 'RoundNumbers':
-                    query = query.not('risk_factors', 'is', null).like('risk_factors', '%redondo%');
+                    // Use contains for JSONB array check - trying both common cases just to be safe
+                    query = query.or('risk_factors.cs.["Redondo"],risk_factors.cs.["Número Redondo"]');
                     break;
                 case 'Fin de Semana (WD)':
                     const dateField = appState.selectedPopulation.column_mapping.date;
                     if (dateField) {
-                        // Using double arrow for JSONB casting to text and then checking day of week
-                        // Note: Complex cases might need to be resolved via raw SQL but we try via JSONB filter if possible
-                        // Or we fetch first 1000 and filter in client for the preview
+                        // Optimización: Fetch lighter payload and limit scan
                         const { data: allRows } = await supabase
+                            .from('audit_data_rows')
+                            .select('unique_id_col, monetary_value_col, raw_json')
+                            .eq('population_id', appState.selectedPopulation.id)
+                            .limit(1000); // Limit to 1k for preview performance
+
+                        if (allRows) {
+                            const weekends = allRows.filter(r => {
+                                const val = r.raw_json?.[dateField];
+                                if (!val) return false;
+                                // Try parsing date
+                                const d = new Date(val);
+                                // JS returns 0 for Sunday, 6 for Saturday
+                                const day = d.getDay();
+                                return day === 0 || day === 6;
+                            });
+                            setDetailItems(weekends);
+                            setIsLoadingDetails(false);
+                            return; // Exit manual handling
+                        }
+                    }
+                    break;
+                case 'Campos Vacíos':
+                    // Special handle for blank fields
+                    if (analysis?.eda?.charStats) {
+                        // We would need to know WHICH column to check, usually mapped fields
+                        // For now we might need to rely on a specific risk factor if one exists, or client scan
+                        // Falling back to a client scan of 1000 items looking for null/empty mapped cols
+                        const { data: scanRows } = await supabase
                             .from('audit_data_rows')
                             .select('unique_id_col, monetary_value_col, raw_json')
                             .eq('population_id', appState.selectedPopulation.id)
                             .limit(1000);
 
-                        const filtered = (allRows || []).filter(r => {
-                            const d = new Date(r.raw_json?.[dateField]);
-                            return !isNaN(d.getTime()) && (d.getDay() === 0 || d.getDay() === 6);
-                        });
-                        setDetailItems(filtered.map(r => ({ id: r.unique_id_col, value: r.monetary_value_col ?? 0, raw: r.raw_json })));
-                        return;
+                        if (scanRows) {
+                            const mapping = appState.selectedPopulation.column_mapping;
+                            const empty = scanRows.filter(r => {
+                                // Check key mapped columns
+                                const cat = r.raw_json?.[mapping.category || ''] || '';
+                                const sub = r.raw_json?.[mapping.subcategory || ''] || '';
+                                return !cat || !sub;
+                            });
+                            setDetailItems(empty);
+                            setIsLoadingDetails(false);
+                            return;
+                        }
                     }
                     break;
-                case 'Campos Vacíos':
-                    const textField = appState.selectedPopulation.column_mapping.category || appState.selectedPopulation.column_mapping.subcategory || appState.selectedPopulation.column_mapping.vendor;
-                    if (textField) {
-                        query = query.or(`raw_json->>${textField}.is.null,raw_json->>${textField}.eq.""`);
-                    }
-                    break;
+
             }
 
             const { data: rows, error } = await query.limit(100);

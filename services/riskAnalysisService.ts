@@ -158,14 +158,25 @@ export const performRiskProfiling = (rows: any[], population: AuditPopulation): 
     let correctDataCount = 0;
     let errorDataCount = 0;
 
+    let positiveValue = 0;
+    let negativeValue = 0;
+    let positiveCount = 0;
+
     // Benford Setup
     const digitCounts = new Array(10).fill(0);
 
     updatedRows.forEach(r => {
         let m = r.monetary_value_col; // Already parsed above
 
-        if (m < 0) negativeCount++;
-        if (m === 0) zeroCount++;
+        if (m < 0) {
+            negativeCount++;
+            negativeValue += m;
+        } else if (m > 0) {
+            positiveCount++;
+            positiveValue += m;
+        } else {
+            zeroCount++;
+        }
 
         absSum += Math.abs(m);
         values.push(m);
@@ -211,14 +222,14 @@ export const performRiskProfiling = (rows: any[], population: AuditPopulation): 
     });
 
     const edaMetrics: EdaMetrics = {
-        netValue: absSum,
+        netValue: positiveValue + negativeValue,
         absoluteValue: absSum,
         totalRecords: correctDataCount,
         zerosCount: zeroCount,
-        positiveValue: 0,
-        negativeValue: 0,
-        positiveCount: 0,
-        negativeCount: negativeCount,
+        positiveValue,
+        negativeValue,
+        positiveCount,
+        negativeCount,
         errorDataCount,
         correctDataCount,
         meanValue: averageValue,
@@ -249,6 +260,8 @@ export const performRiskProfiling = (rows: any[], population: AuditPopulation): 
         profile: {
             totalRiskScore: avgScore,
             gapAlerts: gapAlerts,
+            riskDistribution: [], // Placeholder to satisfy interface
+            topRiskCategories: [], // Placeholder to satisfy interface
             factorsCount: {
                 highValue: updatedRows.filter(r => r.risk_factors?.includes('HIGH_VALUE')).length,
                 weekend: updatedRows.filter(r => r.risk_factors?.includes('WEEKEND')).length,

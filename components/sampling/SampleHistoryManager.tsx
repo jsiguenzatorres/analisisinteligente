@@ -13,17 +13,17 @@ interface Props {
 const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onBack }) => {
     const [history, setHistory] = useState<HistoricalSample[]>([]);
     const [loading, setLoading] = useState(true);
-    const fetchAttemptedRef = React.useRef(false);
+    const lastFetchedIdRef = React.useRef<string | null>(null);
 
     useEffect(() => {
-        // Prevent infinite retries
-        if (fetchAttemptedRef.current) {
+        // Only fetch if we haven't fetched this population ID yet
+        if (lastFetchedIdRef.current === populationId) {
             return;
         }
 
         const fetchHistory = async () => {
             setLoading(true);
-            fetchAttemptedRef.current = true;
+            lastFetchedIdRef.current = populationId;
             try {
                 // Use Proxy to bypass firewall
                 console.log("🌐 Intentando cargar historial vía Proxy...");

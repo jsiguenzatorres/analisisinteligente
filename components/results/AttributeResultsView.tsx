@@ -77,27 +77,32 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
                 last_method: appState.samplingMethod
             };
 
-            const { error } = await supabase
-                .from('audit_results')
-                .upsert({
+            // Use Proxy to save work in progress (Bypass Firewall)
+            const saveRes = await fetch('/api/sampling_proxy?action=save_work_in_progress', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
                     population_id: appState.selectedPopulation.id,
                     results_json: updatedStorage,
-                    sample_size: updatedResults.sampleSize,
-                    updated_at: new Date().toISOString()
-                }, { onConflict: 'population_id' });
+                    sample_size: updatedResults.sampleSize
+                })
+            });
 
-            if (error) {
-                console.error("Error saving results to DB:", error);
-                setSaveFeedback({ show: true, title: "Error de Sincronización", message: error.message, type: 'error' });
-            } else {
-                // Actualizamos el estado global con el nuevo storage para que App.tsx esté sincronizado
-                setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
+            if (!saveRes.ok) {
+                const errText = await saveRes.text();
+                throw new Error(`Proxy Save Failed (${saveRes.status}): ${errText}`);
+            }
 
-                if (!silent) {
-                    setSaveFeedback({ show: true, title: "Sincronizado", message: "Papel de trabajo actualizado.", type: 'success' });
-                }
+            // Actualizamos el estado global con el nuevo storage para que App.tsx esté sincronizado
+            setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
+
+            if (!silent) {
+                setSaveFeedback({ show: true, title: "Sincronizado", message: "Papel de trabajo actualizado.", type: 'success' });
             }
         } catch (err: any) {
+            console.error("Error saving results via Proxy:", err);
+            setSaveFeedback({ show: true, title: "Error de Sincronización", message: err.message, type: 'error' });
+        } finally {
             console.error("Exception saving to DB:", err);
             if (!silent) setSaveFeedback({ show: true, title: "Error", message: "Falla de red.", type: 'error' });
         } finally {

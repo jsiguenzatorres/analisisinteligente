@@ -84,6 +84,13 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
         };
     }, [appState.selectedPopulation]);
 
+    // Restore selection from global state on mount
+    React.useEffect(() => {
+        if (params.selectedInsight) {
+            setSelectedInsight(params.selectedInsight);
+        }
+    }, [params.selectedInsight]);
+
     const formatMoney = (amount: number) => {
         return amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };

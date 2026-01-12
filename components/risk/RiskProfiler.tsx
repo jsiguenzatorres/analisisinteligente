@@ -191,8 +191,8 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                         <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Red de Dispersión Forense</h4>
                     </div>
 
-                    <div className="h-[400px]">
-                        <ResponsiveContainer width="100%" height="100%">
+                    <div className="h-[400px]" style={{ minHeight: '400px', width: '100%' }}>
+                        <ResponsiveContainer width="100%" height="100%" debounce={300}>
                             <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                                 <XAxis type="number" dataKey="x" name="Alertas" hide />

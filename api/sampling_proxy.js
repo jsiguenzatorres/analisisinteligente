@@ -97,6 +97,54 @@ export default async function handler(req, res) {
                 if (error) throw error;
                 return res.status(200).json({ rows: data });
 
+            } else if (action === 'get_non_statistical_sample') {
+                // SERVER-SIDE SAMPLING (Specific Non-Statistical Criteria)
+                const { type, size, threshold } = req.query;
+                const limit = parseInt(size) || 30;
+
+                let query = supabase.from('audit_data_rows')
+                    .select('unique_id_col, monetary_value_col, risk_score, risk_factors, raw_json')
+                    .eq('population_id', population_id);
+
+                switch (type) {
+                    case 'RiskScoring':
+                        query = query.order('risk_score', { ascending: false });
+                        break;
+                    case 'Benford':
+                        // Filter rows where risk_factors array contains Benford alerts
+                        // Note: Requires risk_factors to be populated correctly during upload/profiling
+                        query = query.not('risk_factors', 'is', null).or('risk_factors.cs.{"Benford"},risk_factors.cs.{"Benford (1)"},risk_factors.cs.{"Benford (2)"}');
+                        // Fallback order
+                        query = query.order('risk_score', { ascending: false });
+                        break;
+                    case 'Outliers':
+                        // Use threshold if provided (passed from client analysis)
+                        if (threshold) {
+                            query = query.gt('monetary_value_col', threshold);
+                        } else {
+                            // Fallback: Just high risk/high value
+                            query = query.order('monetary_value_col', { ascending: false });
+                        }
+                        break;
+                    case 'Duplicates':
+                        query = query.contains('risk_factors', ['Duplicado']);
+                        break;
+                    case 'RoundNumbers':
+                        // Search for generic Round Number tag
+                        query = query.contains('risk_factors', ['Redondo']);
+                        break;
+                    default:
+                        query = query.order('risk_score', { ascending: false });
+                }
+
+                const { data, error } = await query.limit(limit);
+
+                if (error) throw error;
+
+                // If specific filter returns few/no results, fallback to Risk Score? 
+                // For now return what we found. Client handles empty check.
+                return res.status(200).json({ rows: data });
+
             } else if (action === 'get_history') {
                 const { data, error } = await supabase
                     .from('audit_historical_samples')

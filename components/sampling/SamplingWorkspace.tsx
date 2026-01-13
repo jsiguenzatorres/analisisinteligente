@@ -92,29 +92,95 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
         }
 
         try {
-            // Use Proxy for fetching data (Bypass Firewall)
-            const res = await fetch(`/api/sampling_proxy?action=get_universe&population_id=${appState.selectedPopulation.id}`);
-            if (!res.ok) throw new Error('Failed to fetch population data via proxy');
+            let results: any = null;
 
-            const { rows: realRows } = await res.json();
+            // ---------------------------------------------------------
+            // STRATEGY A: SERVER-SIDE SAMPLING (Non-Statistical & Attribute)
+            // ---------------------------------------------------------
+            if (appState.samplingMethod === SamplingMethod.NonStatistical || appState.samplingMethod === SamplingMethod.Attribute) {
+                console.log("🚀 Executing Server-Side Sampling...");
+                let serverRows: any[] = [];
 
-            // Use updated appState with manualAllocations if applicable
-            const currentAppState = manualAllocations ? {
-                ...appState,
-                samplingParams: {
-                    ...appState.samplingParams,
-                    stratified: { ...appState.samplingParams.stratified, manualAllocations }
+                if (appState.samplingMethod === SamplingMethod.NonStatistical) {
+                    const type = appState.samplingParams.nonStatistical.selectedInsight || 'RiskScoring';
+                    const size = appState.samplingParams.nonStatistical.sampleSize || 30;
+                    const threshold = appState.selectedPopulation?.advanced_analysis?.outliersThreshold || 0;
+
+                    const res = await fetch(`/api/sampling_proxy?action=get_non_statistical_sample&population_id=${appState.selectedPopulation.id}&type=${type}&size=${size}&threshold=${threshold}`);
+                    if (!res.ok) throw new Error("Error en muestreo No Estadístico (Server-Side)");
+                    const { rows } = await res.json();
+                    serverRows = rows;
+
+                } else if (appState.samplingMethod === SamplingMethod.Attribute) {
+                    const attrParams = {
+                        sampleSize: appState.samplingParams.attribute.sampleSize || 30
+                    };
+                    const res = await fetch('/api/sampling_proxy?action=calculate_sample', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            population_id: appState.selectedPopulation.id,
+                            method: appState.samplingMethod,
+                            params: attrParams
+                        })
+                    });
+                    if (!res.ok) throw new Error("Error en muestreo Atributos (Server-Side)");
+                    const { rows } = await res.json();
+                    serverRows = rows;
                 }
-            } : appState;
 
-            const results = calculateSampleSize(currentAppState, realRows || []);
+                if (!serverRows || serverRows.length === 0) throw new Error("No se encontraron registros aptos para la muestra.");
 
-            // Adjuntar las observaciones al snapshot de resultados para el reporte
-            results.observations = appState.observations;
+                // Map Server Rows to Sample Format
+                const serverSample = serverRows.map((r: any) => ({
+                    id: String(r.unique_id_col),
+                    value: r.monetary_value_col || 0,
+                    risk_score: r.risk_score,
+                    risk_factors: r.risk_factors || [],
+                    risk_flag: r.risk_score > 0 ? 'RIESGO DETECTADO' : 'Muestreo Aleatorio',
+                    risk_justification: `Selección Servidor: ${appState.samplingMethod}`,
+                    is_manual_selection: true,
+                    raw_row: r.raw_json
+                }));
 
-            // ... (rest of the logic remains similar but ensures result.sampling_params is correct)
+                results = {
+                    sampleSize: serverSample.length,
+                    sample: serverSample,
+                    totalErrorProjection: 0,
+                    upperErrorLimit: 0,
+                    findings: [],
+                    methodologyNotes: ["Ejecución Server-Side para optimización de recursos."],
+                    observations: appState.observations
+                };
+
+            } else {
+                // ---------------------------------------------------------
+                // STRATEGY B: CLIENT-SIDE SAMPLING (MUS, Stratified, CAV)
+                // ---------------------------------------------------------
+                // Use Proxy for fetching data (Bypass Firewall)
+                const res = await fetch(`/api/sampling_proxy?action=get_universe&population_id=${appState.selectedPopulation.id}`);
+                if (!res.ok) throw new Error('Failed to fetch population data via proxy');
+
+                const { rows: realRows } = await res.json();
+
+                // Use updated appState with manualAllocations if applicable
+                const currentAppState = manualAllocations ? {
+                    ...appState,
+                    samplingParams: {
+                        ...appState.samplingParams,
+                        stratified: { ...appState.samplingParams.stratified, manualAllocations }
+                    }
+                } : appState;
+
+                results = calculateSampleSize(currentAppState, realRows || []);
+                results.observations = appState.observations;
+            }
+
+            // Common Finalization Logic
+            if (!results) throw new Error("No se generaron resultados.");
 
             if (isFinal) {
+                // ... (Keep existing saving logic match variables)
                 await supabase
                     .from('audit_historical_samples')
                     .update({ is_current: false })
@@ -133,7 +199,6 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                     is_current: true
                 };
 
-                // Use Proxy for Saving to avoid Firewall issues
                 const savePayload = {
                     population_id: appState.selectedPopulation.id,
                     method: appState.samplingMethod,
@@ -148,10 +213,7 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                 });
 
                 if (!saveRes.ok) throw new Error(await saveRes.text());
-
                 const savedSample = await saveRes.json();
-
-                // if (saveError) throw saveError; // Handled by proxy check above
 
                 setAppState(prev => {
                     const currentMethodResults = {
@@ -193,6 +255,7 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                 });
             }
             onComplete();
+
         } catch (error: any) {
             console.error("Error en flujo de muestreo:", error);
             addToast(`ERROR EN EL PROCESO: ${error?.message || "Error inesperado"}`, 'error');

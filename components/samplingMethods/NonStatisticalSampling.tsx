@@ -2,9 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { AppState, AdvancedAnalysis, InsightType } from '../../types';
 import Modal from '../ui/Modal';
-import {
-    BarChart, Bar, ResponsiveContainer, Cell
-} from 'recharts';
+
 import { supabase } from '../../services/supabaseClient';
 import { utils, writeFile } from 'xlsx';
 

@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { HistoricalSample, SamplingMethod } from '../../types';
 import { supabase } from '../../services/supabaseClient';
+import { samplingProxyFetch, FetchTimeoutError, FetchNetworkError } from '../../services/fetchUtils';
 
 interface Props {
     populationId: string;
@@ -12,34 +13,50 @@ interface Props {
 const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onBack }) => {
     const [history, setHistory] = useState<HistoricalSample[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchHistory = async () => {
             setLoading(true);
+            setError(null);
+            
             try {
-                // Use Proxy to bypass firewall
-                console.log("🌐 Intentando cargar historial vía Proxy...");
-
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s Timeout
-
-                const res = await fetch(`/api/sampling_proxy?action=get_history&population_id=${populationId}`, { signal: controller.signal });
-                clearTimeout(timeoutId);
-
-                if (!res.ok) throw new Error(`Proxy Failed: ${res.status}`);
-
-                const { history } = await res.json();
-                if (history) setHistory(history as HistoricalSample[]);
+                console.log("🌐 Cargando historial vía proxy con timeout...");
+                
+                // Usar el proxy con timeout y manejo de errores mejorado
+                const { history: historyData } = await samplingProxyFetch('get_history', {
+                    population_id: populationId
+                });
+                
+                if (historyData) {
+                    setHistory(historyData as HistoricalSample[]);
+                } else {
+                    setHistory([]);
+                }
+                
             } catch (err: any) {
                 console.error("Error fetching history:", err);
-                if (err.name === 'AbortError') {
-                    console.warn("Proxy Timeout (10s)");
+                
+                let errorMessage = "Error al cargar el historial";
+                
+                if (err instanceof FetchTimeoutError) {
+                    errorMessage = "Timeout: La carga tardó demasiado tiempo. Verifique su conexión.";
+                } else if (err instanceof FetchNetworkError) {
+                    errorMessage = "Error de conexión: " + err.message;
+                } else {
+                    errorMessage += ": " + (err.message || "Error desconocido");
                 }
+                
+                setError(errorMessage);
+                setHistory([]);
             } finally {
                 setLoading(false);
             }
         };
-        fetchHistory();
+        
+        if (populationId) {
+            fetchHistory();
+        }
     }, [populationId]);
 
     const getMethodBadge = (method: SamplingMethod) => {
@@ -75,6 +92,65 @@ const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onB
                 <div className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border border-slate-100 shadow-sm">
                     <i className="fas fa-circle-notch fa-spin text-4xl text-blue-500 mb-4"></i>
                     <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Consultando Archivo Digital...</p>
+                    <p className="text-slate-300 text-xs mt-2">Esto puede tomar unos segundos</p>
+                </div>
+            ) : error ? (
+                <div className="py-20 bg-red-50 rounded-3xl border border-red-200">
+                    <div className="text-center max-w-md mx-auto">
+                        <i className="fas fa-exclamation-triangle text-4xl text-red-500 mb-4"></i>
+                        <h3 className="text-xl font-bold text-red-800 mb-2">Error al Cargar Historial</h3>
+                        <p className="text-red-700 text-sm mb-6">{error}</p>
+                        <div className="flex gap-3 justify-center">
+                            <button
+                                onClick={() => {
+                                    setError(null);
+                                    // Trigger re-fetch by updating a dependency
+                                    const fetchHistory = async () => {
+                                        setLoading(true);
+                                        setError(null);
+                                        
+                                        try {
+                                            const { history: historyData } = await samplingProxyFetch('get_history', {
+                                                population_id: populationId
+                                            });
+                                            
+                                            if (historyData) {
+                                                setHistory(historyData as HistoricalSample[]);
+                                            } else {
+                                                setHistory([]);
+                                            }
+                                        } catch (err: any) {
+                                            console.error("Error fetching history:", err);
+                                            
+                                            let errorMessage = "Error al cargar el historial";
+                                            if (err instanceof FetchTimeoutError) {
+                                                errorMessage = "Timeout: La carga tardó demasiado tiempo";
+                                            } else if (err instanceof FetchNetworkError) {
+                                                errorMessage = "Error de conexión: " + err.message;
+                                            } else {
+                                                errorMessage += ": " + (err.message || "Error desconocido");
+                                            }
+                                            
+                                            setError(errorMessage);
+                                            setHistory([]);
+                                        } finally {
+                                            setLoading(false);
+                                        }
+                                    };
+                                    fetchHistory();
+                                }}
+                                className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-700 transition-all"
+                            >
+                                <i className="fas fa-redo mr-2"></i>Reintentar
+                            </button>
+                            <button
+                                onClick={onBack}
+                                className="bg-white text-red-600 border border-red-200 px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-50 transition-all"
+                            >
+                                Volver
+                            </button>
+                        </div>
+                    </div>
                 </div>
             ) : history.length === 0 ? (
                 <div className="text-center py-20 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">

@@ -1,7 +1,7 @@
 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { AppState, SamplingMethod, AuditResults, AuditObservation } from '../types';
+import { AppState, SamplingMethod, AuditResults, AuditObservation, AdvancedAnalysis } from '../types';
 import { calculateInference } from './statisticalService';
 
 const COLORS = {
@@ -17,6 +17,251 @@ const COLORS = {
 const formatCurrency = (val: number | undefined) => {
     if (val === undefined || val === null) return "$0.00";
     return `$${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+// Función para generar el diagnóstico forense en PDF
+const generateForensicDiagnosis = (doc: jsPDF, analysis: AdvancedAnalysis, startY: number, pageWidth: number, margin: number): number => {
+    let currentY = startY;
+    
+    // Determinar si es análisis básico o forense
+    const hasForensicAnalysis = analysis.entropy || analysis.splitting || analysis.sequential || 
+                               analysis.isolationForest || analysis.actorProfiling || analysis.enhancedBenford;
+    
+    const diagnosisTitle = hasForensicAnalysis ? "DIAGNÓSTICO PRELIMINAR DE ANÁLISIS FORENSE" : "DIAGNÓSTICO PRELIMINAR DE ANÁLISIS BÁSICO";
+    
+    // Título de la sección
+    doc.setFillColor(15, 23, 42); // Slate 900
+    doc.rect(margin, currentY, pageWidth - (margin * 2), 15, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text(diagnosisTitle, margin + 5, currentY + 10);
+    
+    currentY += 20;
+    
+    // Resumen ejecutivo del análisis
+    doc.setTextColor(30, 58, 138);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text("RESUMEN EJECUTIVO DE HALLAZGOS", margin, currentY);
+    currentY += 8;
+    
+    // Análisis básico siempre presente
+    const basicFindings = [];
+    
+    // Ley de Benford
+    if (analysis.benford && analysis.benford.length > 0) {
+        const suspiciousDigits = analysis.benford.filter(b => b.isSuspicious).length;
+        if (suspiciousDigits > 0) {
+            basicFindings.push(`🔍 Ley de Benford: ${suspiciousDigits} dígitos con desviaciones significativas detectados`);
+        } else {
+            basicFindings.push(`✅ Ley de Benford: Distribución normal de primeros dígitos`);
+        }
+    }
+    
+    // Duplicados
+    if (analysis.duplicatesCount !== undefined) {
+        if (analysis.duplicatesCount > 0) {
+            basicFindings.push(`🔍 Duplicados: ${analysis.duplicatesCount} transacciones repetidas identificadas`);
+        } else {
+            basicFindings.push(`✅ Duplicados: No se detectaron transacciones repetidas`);
+        }
+    }
+    
+    // Outliers
+    if (analysis.outliersCount !== undefined) {
+        if (analysis.outliersCount > 0) {
+            basicFindings.push(`🔍 Valores Atípicos: ${analysis.outliersCount} outliers detectados (umbral: ${formatCurrency(analysis.outliersThreshold)})`);
+        } else {
+            basicFindings.push(`✅ Valores Atípicos: No se detectaron outliers significativos`);
+        }
+    }
+    
+    // Análisis forense avanzado (si está disponible)
+    const forensicFindings = [];
+    
+    if (hasForensicAnalysis) {
+        // Análisis de Entropía
+        if (analysis.entropy) {
+            if (analysis.entropy.highRiskCombinations > 0) {
+                forensicFindings.push(`🚨 Entropía: ${analysis.entropy.highRiskCombinations} combinaciones categóricas de alto riesgo`);
+            } else if (analysis.entropy.anomalousCount > 0) {
+                forensicFindings.push(`⚠️ Entropía: ${analysis.entropy.anomalousCount} combinaciones categóricas inusuales`);
+            } else {
+                forensicFindings.push(`✅ Entropía: Distribución categórica normal`);
+            }
+        }
+        
+        // Detección de Fraccionamiento
+        if (analysis.splitting) {
+            if (analysis.splitting.highRiskGroups > 0) {
+                forensicFindings.push(`🚨 Fraccionamiento: ${analysis.splitting.highRiskGroups} grupos de alto riesgo (Score: ${analysis.splitting.averageRiskScore.toFixed(1)})`);
+            } else if (analysis.splitting.suspiciousVendors > 0) {
+                forensicFindings.push(`⚠️ Fraccionamiento: ${analysis.splitting.suspiciousVendors} proveedores con patrones sospechosos`);
+            } else {
+                forensicFindings.push(`✅ Fraccionamiento: No se detectaron patrones de evasión`);
+            }
+        }
+        
+        // Integridad Secuencial
+        if (analysis.sequential) {
+            if (analysis.sequential.highRiskGaps > 0) {
+                forensicFindings.push(`🚨 Gaps Secuenciales: ${analysis.sequential.highRiskGaps} gaps críticos (máximo: ${analysis.sequential.largestGap})`);
+            } else if (analysis.sequential.totalGaps > 0) {
+                forensicFindings.push(`⚠️ Gaps Secuenciales: ${analysis.sequential.totalGaps} gaps menores detectados`);
+            } else {
+                forensicFindings.push(`✅ Gaps Secuenciales: Numeración íntegra`);
+            }
+        }
+        
+        // Isolation Forest
+        if (analysis.isolationForest) {
+            if (analysis.isolationForest.highRiskAnomalies > 0) {
+                forensicFindings.push(`🚨 ML Anomalías: ${analysis.isolationForest.highRiskAnomalies} anomalías críticas detectadas por IA`);
+            } else if (analysis.isolationForest.totalAnomalies > 0) {
+                forensicFindings.push(`⚠️ ML Anomalías: ${analysis.isolationForest.totalAnomalies} patrones inusuales detectados`);
+            } else {
+                forensicFindings.push(`✅ ML Anomalías: Patrones multidimensionales normales`);
+            }
+        }
+        
+        // Actor Profiling
+        if (analysis.actorProfiling) {
+            if (analysis.actorProfiling.highRiskActors > 0) {
+                forensicFindings.push(`🚨 Perfilado Actores: ${analysis.actorProfiling.highRiskActors} usuarios con comportamiento crítico`);
+            } else if (analysis.actorProfiling.totalSuspiciousActors > 0) {
+                forensicFindings.push(`⚠️ Perfilado Actores: ${analysis.actorProfiling.totalSuspiciousActors} usuarios con patrones inusuales`);
+            } else {
+                forensicFindings.push(`✅ Perfilado Actores: Comportamientos de usuario normales`);
+            }
+        }
+        
+        // Enhanced Benford
+        if (analysis.enhancedBenford) {
+            if (analysis.enhancedBenford.conformityRiskLevel === 'HIGH') {
+                forensicFindings.push(`🚨 Benford Avanzado: No conformidad crítica (MAD: ${analysis.enhancedBenford.overallDeviation.toFixed(2)}%)`);
+            } else if (analysis.enhancedBenford.conformityRiskLevel === 'MEDIUM') {
+                forensicFindings.push(`⚠️ Benford Avanzado: Conformidad marginal (MAD: ${analysis.enhancedBenford.overallDeviation.toFixed(2)}%)`);
+            } else {
+                forensicFindings.push(`✅ Benford Avanzado: Conformidad aceptable (MAD: ${analysis.enhancedBenford.overallDeviation.toFixed(2)}%)`);
+            }
+        }
+    }
+    
+    // Mostrar hallazgos básicos
+    doc.setTextColor(50, 50, 50);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    
+    basicFindings.forEach(finding => {
+        const splitText = doc.splitTextToSize(finding, pageWidth - (margin * 2));
+        doc.text(splitText, margin + 5, currentY);
+        currentY += splitText.length * 4 + 2;
+    });
+    
+    // Mostrar hallazgos forenses si existen
+    if (forensicFindings.length > 0) {
+        currentY += 5;
+        doc.setTextColor(30, 58, 138);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.text("HALLAZGOS FORENSES AVANZADOS", margin, currentY);
+        currentY += 8;
+        
+        doc.setTextColor(50, 50, 50);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        
+        forensicFindings.forEach(finding => {
+            const splitText = doc.splitTextToSize(finding, pageWidth - (margin * 2));
+            doc.text(splitText, margin + 5, currentY);
+            currentY += splitText.length * 4 + 2;
+        });
+    }
+    
+    // Evaluación de riesgo general
+    currentY += 8;
+    doc.setTextColor(30, 58, 138);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text("EVALUACIÓN DE RIESGO PRELIMINAR", margin, currentY);
+    currentY += 8;
+    
+    // Calcular nivel de riesgo general
+    let riskLevel = "BAJO";
+    let riskColor = [22, 163, 74]; // Green
+    let riskDescription = "La población presenta un perfil de riesgo bajo. Se puede proceder con muestreo estadístico estándar.";
+    
+    const criticalFindings = [...basicFindings, ...forensicFindings].filter(f => f.includes('🚨')).length;
+    const warningFindings = [...basicFindings, ...forensicFindings].filter(f => f.includes('⚠️')).length;
+    
+    if (criticalFindings > 0) {
+        riskLevel = "CRÍTICO";
+        riskColor = [220, 38, 38]; // Red
+        riskDescription = `Se detectaron ${criticalFindings} hallazgos críticos que requieren atención inmediata. Se recomienda muestreo dirigido y revisión gerencial.`;
+    } else if (warningFindings > 2) {
+        riskLevel = "ALTO";
+        riskColor = [245, 101, 101]; // Red 400
+        riskDescription = `Se identificaron ${warningFindings} patrones de advertencia. Se recomienda aumentar el tamaño de muestra y implementar controles adicionales.`;
+    } else if (warningFindings > 0) {
+        riskLevel = "MEDIO";
+        riskColor = [251, 191, 36]; // Yellow 400
+        riskDescription = `Se detectaron ${warningFindings} patrones que merecen atención. Se recomienda muestreo estratificado y revisión selectiva.`;
+    }
+    
+    // Mostrar evaluación de riesgo
+    doc.setFillColor(riskColor[0], riskColor[1], riskColor[2]);
+    doc.setTextColor(255, 255, 255);
+    doc.roundedRect(margin, currentY, pageWidth - (margin * 2), 12, 2, 2, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(`NIVEL DE RIESGO: ${riskLevel}`, margin + 5, currentY + 8);
+    
+    currentY += 18;
+    doc.setTextColor(50, 50, 50);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    const splitRiskDesc = doc.splitTextToSize(riskDescription, pageWidth - (margin * 2));
+    doc.text(splitRiskDesc, margin, currentY);
+    currentY += splitRiskDesc.length * 4 + 10;
+    
+    // Recomendaciones específicas
+    doc.setTextColor(30, 58, 138);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text("RECOMENDACIONES DE MUESTREO", margin, currentY);
+    currentY += 8;
+    
+    const recommendations = [];
+    
+    if (criticalFindings > 0) {
+        recommendations.push("• URGENTE: Implementar muestreo dirigido en áreas problemáticas identificadas");
+        recommendations.push("• Aumentar tamaño de muestra en 50-100% sobre lo inicialmente planeado");
+        recommendations.push("• Considerar auditoría forense especializada para hallazgos críticos");
+        recommendations.push("• Documentar todos los hallazgos para escalamiento gerencial");
+    } else if (warningFindings > 0) {
+        recommendations.push("• Considerar muestreo estratificado por nivel de riesgo");
+        recommendations.push("• Aumentar tamaño de muestra en 25-50% en áreas de advertencia");
+        recommendations.push("• Implementar controles adicionales durante la ejecución");
+    } else {
+        recommendations.push("• Proceder con muestreo estadístico según metodología seleccionada");
+        recommendations.push("• Mantener controles estándar de calidad");
+        recommendations.push("• Documentar ausencia de patrones anómalos significativos");
+    }
+    
+    doc.setTextColor(50, 50, 50);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    
+    recommendations.forEach(rec => {
+        const splitRec = doc.splitTextToSize(rec, pageWidth - (margin * 2));
+        doc.text(splitRec, margin, currentY);
+        currentY += splitRec.length * 4 + 2;
+    });
+    
+    currentY += 10;
+    
+    return currentY;
 };
 
 export const generateAuditReport = async (appState: AppState) => {
@@ -66,12 +311,25 @@ export const generateAuditReport = async (appState: AppState) => {
         doc.text("Generado por Asistente de Muestreo de Auditoría v2.0", margin, pageHeight - 10);
     };
 
-    // --- PÁGINA 1: RESUMEN EJECUTIVO Y PARÁMETROS ---
-    addPageHeader("Cédula de Planificación de Muestreo", "Resumen de Parámetros y Estrategia");
+    // --- PÁGINA 1: DIAGNÓSTICO FORENSE Y RESUMEN EJECUTIVO ---
+    addPageHeader("Cédula de Planificación de Muestreo", "Diagnóstico Preliminar y Estrategia");
 
-    // 1. Información del Universo (Tabla compacta)
+    let currentY = 50;
+
+    // 0. DIAGNÓSTICO PRELIMINAR DE ANÁLISIS FORENSE/BÁSICO (NUEVA SECCIÓN)
+    if (pop.advanced_analysis) {
+        currentY = generateForensicDiagnosis(doc, pop.advanced_analysis, currentY, pageWidth, margin);
+        currentY += 10; // Espacio adicional antes de la siguiente sección
+    }
+
+    // 1.1 RESUMEN ESTADÍSTICO DEL UNIVERSO (Renumerado)
+    doc.setTextColor(30, 58, 138);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text("1.1 RESUMEN ESTADÍSTICO DEL UNIVERSO", margin, currentY);
+    currentY += 8;
     autoTable(doc, {
-        startY: 50,
+        startY: currentY,
         head: [['CONCEPTO', 'DETALLE']],
         body: [
             ['Población sujeta a auditoría (N)', `${pop.total_rows.toLocaleString()} registros`],
@@ -86,13 +344,13 @@ export const generateAuditReport = async (appState: AppState) => {
         columnStyles: { 0: { fontStyle: 'bold', cellWidth: 80 } }
     });
 
-    let currentY = (doc as any).lastAutoTable.finalY + 15;
+    currentY = (doc as any).lastAutoTable.finalY + 15;
 
-    // 2. Parámetros de Selección (Según el Método)
+    // 1.2 CONFIGURACIÓN DE MUESTREO (Renumerado)
     doc.setFontSize(12);
     doc.setTextColor(30, 58, 138);
     doc.setFont('helvetica', 'bold');
-    doc.text(`CONFIGURACIÓN: MÉTODO ${samplingMethod === SamplingMethod.Attribute ? 'ATRIBUTOS' : samplingMethod}`, margin, currentY);
+    doc.text(`1.2 CONFIGURACIÓN: MÉTODO ${samplingMethod === SamplingMethod.Attribute ? 'ATRIBUTOS' : samplingMethod}`, margin, currentY);
     currentY += 5;
 
     let paramsData: string[][] = [];
@@ -161,13 +419,19 @@ export const generateAuditReport = async (appState: AppState) => {
 
     currentY = (doc as any).lastAutoTable.finalY + 10;
 
-    // 3. Fórmula Utilizada
+    // 1.3 Fórmula Utilizada (Renumerado)
+    doc.setTextColor(30, 58, 138);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text("1.3 FÓRMULA APLICADA", margin, currentY);
+    currentY += 8;
+    
     doc.setFillColor(241, 245, 249); // Slate 100
     doc.roundedRect(margin, currentY, pageWidth - (margin * 2), 20, 2, 2, 'F');
     doc.setFont('courier', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(50);
-    doc.text(`FÓRMULA APLICADA: ${formulaText}`, margin + 5, currentY + 12);
+    doc.text(formulaText, margin + 5, currentY + 12);
 
     addFooter(1);
 
@@ -175,7 +439,7 @@ export const generateAuditReport = async (appState: AppState) => {
     doc.addPage();
     addPageHeader("Evaluación y Resultados", "Resumen de Hallazgos y Proyección");
 
-    // 4. Resumen de Ejecución
+    // 2.1 Resumen de Ejecución (Renumerado)
     const errors = results.sample.filter(i => i.compliance_status === 'EXCEPCION');
     const totalErrors = errors.length;
     const errorRate = ((totalErrors / results.sampleSize) * 100).toFixed(2);
@@ -250,7 +514,7 @@ export const generateAuditReport = async (appState: AppState) => {
 
     currentY = (doc as any).lastAutoTable.finalY + 15;
 
-    // 4.1 Resumen de Estratificación (Si aplica)
+    // 2.1 Resumen de Estratificación (Si aplica)
     if (samplingMethod === SamplingMethod.Stratified || samplingMethod === SamplingMethod.CAV) {
         const strataGroups: Record<string, { count: number, value: number, errors: number }> = {};
         results.sample.forEach(item => {
@@ -291,7 +555,7 @@ export const generateAuditReport = async (appState: AppState) => {
         currentY = (doc as any).lastAutoTable.finalY + 15;
     }
 
-    // 5. Dictamen / Conclusión
+    // 2.2 Dictamen / Conclusión
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
     doc.setTextColor(0);

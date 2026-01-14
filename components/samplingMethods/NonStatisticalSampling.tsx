@@ -2,11 +2,16 @@
 import React, { useState, useMemo } from 'react';
 import { AppState, AdvancedAnalysis, InsightType } from '../../types';
 import Modal from '../ui/Modal';
+import ForensicResultsView from '../forensic/ForensicResultsView';
+import ForensicConfigModal from '../forensic/ForensicConfigModal';
+import ForensicExplanationModal, { FORENSIC_METHODS } from '../forensic/ForensicExplanationModal';
+import ForensicAnomaliesModal from '../forensic/ForensicAnomaliesModal';
 import {
     BarChart, Bar, ResponsiveContainer, Cell
 } from 'recharts';
 import { supabase } from '../../services/supabaseClient';
 import { utils, writeFile } from 'xlsx';
+import { samplingProxyFetch, FetchTimeoutError, FetchNetworkError } from '../../services/fetchUtils';
 
 interface Props {
     appState: AppState;
@@ -25,6 +30,21 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
 
     const [explanationOpen, setExplanationOpen] = useState(false);
     const [explanationContent, setExplanationContent] = useState({ title: '', text: '', auditImpact: '' });
+
+    // Estados para análisis forense
+    const [forensicResultsOpen, setForensicResultsOpen] = useState(false);
+    const [forensicConfigOpen, setForensicConfigOpen] = useState(false);
+    const [isRunningForensicAnalysis, setIsRunningForensicAnalysis] = useState(false);
+    const [forensicResults, setForensicResults] = useState<AdvancedAnalysis | null>(null);
+    
+    // Estados para modal explicativo
+    const [explanationModalOpen, setExplanationModalOpen] = useState(false);
+    const [selectedMethod, setSelectedMethod] = useState<string | null>(null);
+
+    // Estados para modal de anomalías
+    const [anomaliesModalOpen, setAnomaliesModalOpen] = useState(false);
+    const [selectedAnomalyType, setSelectedAnomalyType] = useState<string | null>(null);
+    const [selectedAnomalyTitle, setSelectedAnomalyTitle] = useState<string>('');
 
     const EDA_EXPLANATIONS = useMemo(() => {
         const gapAlerts = appState.selectedPopulation?.risk_profile?.gapAlerts || 0;
@@ -95,6 +115,31 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
             .reduce((acc, curr) => acc + curr.actualCount, 0);
     };
 
+    // Funciones helper para los nuevos análisis
+    const getEntropyAnomalies = () => {
+        return analysis?.entropy?.anomalousCount || 0;
+    };
+
+    const getSplittingGroups = () => {
+        return analysis?.splitting?.highRiskGroups || 0;
+    };
+
+    const getSequentialGaps = () => {
+        return analysis?.sequential?.highRiskGaps || 0;
+    };
+
+    const getIsolationForestAnomalies = () => {
+        return analysis?.isolationForest?.highRiskAnomalies || 0;
+    };
+
+    const getSuspiciousActors = () => {
+        return analysis?.actorProfiling?.highRiskActors || 0;
+    };
+
+    const getEnhancedBenfordDeviation = () => {
+        return analysis?.enhancedBenford?.overallDeviation || 0;
+    };
+
     const handleInsightSelection = (type: InsightType) => {
         setSelectedInsight(type);
         let criteria = "";
@@ -122,6 +167,30 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                 criteria = "Selección de ítems con 'Redondeo Forense' (múltiplos significativos), técnica orientada a detectar estimaciones contables ad-hoc.";
                 justification = `Debilidad en el Soporte: Los números redondos son inusuales y frecuentemente se vinculan a ajustes manuales. Este enfoque descriptivo (IIA 2320-3) se centra en confirmar la razonabilidad de las transacciones más sospechosas en el área.`;
                 break;
+            case 'Entropy':
+                criteria = "Análisis de Entropía Categórica: Selección dirigida a combinaciones de categorías con distribución anómala o patrones inusuales de clasificación.";
+                justification = `Detección de Irregularidades Categóricas: Las combinaciones raras de categorías pueden indicar errores de clasificación o manipulación intencional. Para un proceso de criticidad ${criticality}, este análisis identifica transacciones mal categorizadas que requieren validación.`;
+                break;
+            case 'Splitting':
+                criteria = "Detección de Fraccionamiento: Identificación de grupos de transacciones del mismo proveedor que, sumadas, exceden umbrales de autorización pero individualmente los evaden.";
+                justification = `Control de Evasión de Umbrales: El fraccionamiento es una técnica común para evadir controles de autorización. En procesos de criticidad ${criticality}, es esencial verificar que las compras no estén siendo artificialmente divididas para evitar supervisión.`;
+                break;
+            case 'Sequential':
+                criteria = "Análisis de Integridad Secuencial: Selección enfocada en detectar gaps o saltos en la numeración secuencial de documentos que pueden indicar eliminación o manipulación.";
+                justification = `Integridad Documental: Los gaps en secuencias numéricas pueden indicar documentos faltantes, eliminados o manipulados. Para criticidad ${criticality}, es crucial verificar la completitud de la documentación soporte.`;
+                break;
+            case 'IsolationForest':
+                criteria = "Machine Learning - Isolation Forest: Algoritmo avanzado de detección de anomalías multidimensionales que identifica patrones complejos no detectables por métodos tradicionales.";
+                justification = `Análisis Multivariado Avanzado: El Isolation Forest detecta anomalías considerando múltiples variables simultáneamente. Para procesos de criticidad ${criticality}, este enfoque de IA identifica patrones sospechosos complejos que requieren investigación detallada.`;
+                break;
+            case 'ActorProfiling':
+                criteria = "Perfilado de Actores: Análisis de comportamiento de usuarios para identificar patrones de actividad anómalos, transacciones fuera de horario o volúmenes inusuales.";
+                justification = `Análisis Conductual: Los patrones de comportamiento anómalos de usuarios pueden indicar actividad fraudulenta o errores sistemáticos. En procesos de criticidad ${criticality}, es importante verificar que la actividad de los usuarios esté dentro de parámetros normales.`;
+                break;
+            case 'EnhancedBenford':
+                criteria = "Benford Avanzado: Análisis mejorado de la Ley de Benford incluyendo segundo dígito y análisis combinado de primeros dos dígitos para mayor sensibilidad en la detección.";
+                justification = `Detección Avanzada de Manipulación: El análisis de segundo dígito es más sensible que el tradicional primer dígito para detectar manipulación sutil de datos. Para criticidad ${criticality}, este enfoque mejorado aumenta la probabilidad de detectar alteraciones sofisticadas.`;
+                break;
         }
 
         const criticalGaps = appState.selectedPopulation?.risk_profile?.gapAlerts || 0;
@@ -143,6 +212,55 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
         }));
     };
 
+    // Funciones para análisis forense
+    const handleRunForensicAnalysis = async (config?: any) => {
+        if (!appState.selectedPopulation) return;
+
+        setIsRunningForensicAnalysis(true);
+        
+        try {
+            // Simular llamada al análisis forense con configuración
+            const response = await samplingProxyFetch('run_forensic_analysis', {
+                population_id: appState.selectedPopulation.id,
+                config: config || {
+                    splittingThresholds: [1000, 5000, 10000, 25000, 50000],
+                    timeWindow: 30,
+                    entropyThreshold: 0.02
+                }
+            });
+
+            if (response.success) {
+                setForensicResults(response.analysis);
+                setForensicResultsOpen(true);
+            } else {
+                console.error('Error en análisis forense:', response.error);
+            }
+        } catch (error) {
+            console.error('Error ejecutando análisis forense:', error);
+        } finally {
+            setIsRunningForensicAnalysis(false);
+        }
+    };
+
+    const handleOpenForensicConfig = () => {
+        setForensicConfigOpen(true);
+    };
+
+    const handleOpenMethodExplanation = (methodId: string) => {
+        setSelectedMethod(methodId);
+        setExplanationModalOpen(true);
+    };
+
+    const handleOpenAnomaliesModal = (analysisType: string, title: string) => {
+        setSelectedAnomalyType(analysisType);
+        setSelectedAnomalyTitle(title);
+        setAnomaliesModalOpen(true);
+    };
+
+    const handleSaveForensicConfig = (config: any) => {
+        handleRunForensicAnalysis(config);
+    };
+
     const handleShowDetails = async (e: React.MouseEvent, type: string) => {
         e.stopPropagation();
         if (!appState.selectedPopulation) return;
@@ -153,80 +271,244 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
         setDetailItems([]);
 
         try {
-            let query = supabase
-                .from('audit_data_rows')
-                .select('unique_id_col, monetary_value_col, raw_json')
-                .eq('population_id', appState.selectedPopulation.id);
+            let rows: any[] = [];
 
+            // Usar el proxy para consultas más eficientes y con timeout
             switch (type) {
                 case 'Negativos':
-                    query = query.lt('monetary_value_col', 0);
-                    break;
                 case 'Positivos':
-                    query = query.gt('monetary_value_col', 0);
-                    break;
                 case 'En Cero':
-                    query = query.eq('monetary_value_col', 0);
-                    break;
                 case 'Datos Erróneos':
-                    query = query.is('monetary_value_col', null);
-                    break;
                 case 'Mínimo':
-                    if (analysis?.eda?.minId) query = query.eq('unique_id_col', analysis.eda.minId);
-                    else query = query.order('monetary_value_col', { ascending: true }).limit(1);
-                    break;
                 case 'Máximo':
-                    if (analysis?.eda?.maxId) query = query.eq('unique_id_col', analysis.eda.maxId);
-                    else query = query.order('monetary_value_col', { ascending: false }).limit(1);
+                    // Usar consulta directa con timeout para casos simples
+                    const { rows: directRows } = await samplingProxyFetch('get_universe', {
+                        population_id: appState.selectedPopulation.id,
+                        detailed: 'true'
+                    });
+                    
+                    // Filtrar en el cliente para evitar consultas SQL complejas
+                    rows = (directRows || []).filter(r => {
+                        switch (type) {
+                            case 'Negativos':
+                                return (r.monetary_value_col || 0) < 0;
+                            case 'Positivos':
+                                return (r.monetary_value_col || 0) > 0;
+                            case 'En Cero':
+                                return (r.monetary_value_col || 0) === 0;
+                            case 'Datos Erróneos':
+                                return r.monetary_value_col === null || r.monetary_value_col === undefined;
+                            case 'Mínimo':
+                                return analysis?.eda?.minId ? r.unique_id_col === analysis.eda.minId : false;
+                            case 'Máximo':
+                                return analysis?.eda?.maxId ? r.unique_id_col === analysis.eda.maxId : false;
+                            default:
+                                return false;
+                        }
+                    }).slice(0, 100); // Limitar a 100 registros para performance
                     break;
+
                 case 'Outliers':
+                    // Usar el proxy para obtener registros con alto riesgo
+                    const { rows: outlierRows } = await samplingProxyFetch('get_smart_sample', {
+                        population_id: appState.selectedPopulation.id,
+                        sample_size: 100
+                    });
+                    
                     const threshold = analysis?.outliersThreshold || 0;
-                    query = query.gt('monetary_value_col', threshold);
+                    rows = (outlierRows || []).filter(r => (r.monetary_value_col || 0) > threshold);
                     break;
+
                 case 'Duplicates':
-                    query = query.not('risk_factors', 'is', null).like('risk_factors', '%Duplicado%');
-                    break;
                 case 'RoundNumbers':
-                    query = query.not('risk_factors', 'is', null).like('risk_factors', '%redondo%');
+                    // Usar consulta con filtro de factores de riesgo
+                    const { rows: riskRows } = await samplingProxyFetch('get_universe', {
+                        population_id: appState.selectedPopulation.id,
+                        include_factors: 'true'
+                    });
+                    
+                    rows = (riskRows || []).filter(r => {
+                        const factors = r.risk_factors || [];
+                        if (type === 'Duplicates') {
+                            return factors.some((f: string) => f.toLowerCase().includes('duplicado'));
+                        } else if (type === 'RoundNumbers') {
+                            return factors.some((f: string) => f.toLowerCase().includes('redondo'));
+                        }
+                        return false;
+                    }).slice(0, 100);
                     break;
+
+                case 'Entropy':
+                    // Filtrar por anomalías categóricas de entropía
+                    const { rows: entropyRows } = await samplingProxyFetch('get_universe', {
+                        population_id: appState.selectedPopulation.id,
+                        include_factors: 'true'
+                    });
+                    
+                    rows = (entropyRows || []).filter(r => {
+                        const factors = r.risk_factors || [];
+                        return factors.some((f: string) => f.toLowerCase().includes('entropy') || f.toLowerCase().includes('categoria'));
+                    }).slice(0, 100);
+                    break;
+
+                case 'Splitting':
+                    // Filtrar por grupos de fraccionamiento
+                    const { rows: splittingRows } = await samplingProxyFetch('get_universe', {
+                        population_id: appState.selectedPopulation.id,
+                        include_factors: 'true'
+                    });
+                    
+                    rows = (splittingRows || []).filter(r => {
+                        const factors = r.risk_factors || [];
+                        return factors.some((f: string) => f.toLowerCase().includes('splitting') || f.toLowerCase().includes('fraccionamiento'));
+                    }).slice(0, 100);
+                    break;
+
+                case 'Sequential':
+                    // Filtrar por gaps secuenciales
+                    const { rows: sequentialRows } = await samplingProxyFetch('get_universe', {
+                        population_id: appState.selectedPopulation.id,
+                        include_factors: 'true'
+                    });
+                    
+                    rows = (sequentialRows || []).filter(r => {
+                        const factors = r.risk_factors || [];
+                        return factors.some((f: string) => f.toLowerCase().includes('gap') || f.toLowerCase().includes('secuencial'));
+                    }).slice(0, 100);
+                    break;
+
+                case 'IsolationForest':
+                    // Filtrar por anomalías de Isolation Forest
+                    const { rows: isolationRows } = await samplingProxyFetch('get_universe', {
+                        population_id: appState.selectedPopulation.id,
+                        include_factors: 'true'
+                    });
+                    
+                    rows = (isolationRows || []).filter(r => {
+                        const factors = r.risk_factors || [];
+                        return factors.some((f: string) => f.toLowerCase().includes('isolation') || f.toLowerCase().includes('ml_anomaly'));
+                    }).slice(0, 100);
+                    break;
+
+                case 'ActorProfiling':
+                    // Filtrar por actores sospechosos
+                    const { rows: actorRows } = await samplingProxyFetch('get_universe', {
+                        population_id: appState.selectedPopulation.id,
+                        include_factors: 'true'
+                    });
+                    
+                    rows = (actorRows || []).filter(r => {
+                        const factors = r.risk_factors || [];
+                        return factors.some((f: string) => f.toLowerCase().includes('actor') || f.toLowerCase().includes('usuario_sospechoso'));
+                    }).slice(0, 100);
+                    break;
+
+                case 'EnhancedBenford':
+                    // Filtrar por anomalías de Benford avanzado
+                    const { rows: enhancedBenfordRows } = await samplingProxyFetch('get_universe', {
+                        population_id: appState.selectedPopulation.id,
+                        include_factors: 'true'
+                    });
+                    
+                    rows = (enhancedBenfordRows || []).filter(r => {
+                        const factors = r.risk_factors || [];
+                        return factors.some((f: string) => f.toLowerCase().includes('enhanced_benford') || f.toLowerCase().includes('segundo_digito'));
+                    }).slice(0, 100);
+                    break;
+
                 case 'Fin de Semana (WD)':
+                    // Obtener muestra y filtrar por fecha en el cliente
                     const dateField = appState.selectedPopulation.column_mapping.date;
                     if (dateField) {
-                        // Using double arrow for JSONB casting to text and then checking day of week
-                        // Note: Complex cases might need to be resolved via raw SQL but we try via JSONB filter if possible
-                        // Or we fetch first 1000 and filter in client for the preview
-                        const { data: allRows } = await supabase
-                            .from('audit_data_rows')
-                            .select('unique_id_col, monetary_value_col, raw_json')
-                            .eq('population_id', appState.selectedPopulation.id)
-                            .limit(1000);
-
-                        const filtered = (allRows || []).filter(r => {
-                            const d = new Date(r.raw_json?.[dateField]);
-                            return !isNaN(d.getTime()) && (d.getDay() === 0 || d.getDay() === 6);
+                        const { rows: dateRows } = await samplingProxyFetch('get_universe', {
+                            population_id: appState.selectedPopulation.id,
+                            detailed: 'true'
                         });
-                        setDetailItems(filtered.map(r => ({ id: r.unique_id_col, value: r.monetary_value_col ?? 0, raw: r.raw_json })));
-                        return;
+
+                        rows = (dateRows || []).filter(r => {
+                            try {
+                                const rawData = typeof r.raw_json === 'string' ? JSON.parse(r.raw_json) : r.raw_json;
+                                const dateValue = rawData?.[dateField];
+                                if (!dateValue) return false;
+                                
+                                const d = new Date(dateValue);
+                                return !isNaN(d.getTime()) && (d.getDay() === 0 || d.getDay() === 6);
+                            } catch (error) {
+                                console.warn('Error parsing date:', error);
+                                return false;
+                            }
+                        }).slice(0, 100);
                     }
                     break;
+
                 case 'Campos Vacíos':
-                    const textField = appState.selectedPopulation.column_mapping.category || appState.selectedPopulation.column_mapping.subcategory || appState.selectedPopulation.column_mapping.vendor;
+                    // Obtener muestra y filtrar por campos vacíos en el cliente
+                    const textField = appState.selectedPopulation.column_mapping.category || 
+                                    appState.selectedPopulation.column_mapping.subcategory || 
+                                    appState.selectedPopulation.column_mapping.vendor;
+                    
                     if (textField) {
-                        query = query.or(`raw_json->>${textField}.is.null,raw_json->>${textField}.eq.""`);
+                        const { rows: textRows } = await samplingProxyFetch('get_universe', {
+                            population_id: appState.selectedPopulation.id,
+                            detailed: 'true'
+                        });
+
+                        rows = (textRows || []).filter(r => {
+                            try {
+                                const rawData = typeof r.raw_json === 'string' ? JSON.parse(r.raw_json) : r.raw_json;
+                                const fieldValue = rawData?.[textField];
+                                return !fieldValue || fieldValue.toString().trim() === '';
+                            } catch (error) {
+                                console.warn('Error parsing text field:', error);
+                                return false;
+                            }
+                        }).slice(0, 100);
                     }
                     break;
+
+                case 'Benford':
+                    // Para Benford, usar los registros con anomalías detectadas
+                    const { rows: benfordRows } = await samplingProxyFetch('get_universe', {
+                        population_id: appState.selectedPopulation.id,
+                        include_factors: 'true'
+                    });
+                    
+                    rows = (benfordRows || []).filter(r => {
+                        const factors = r.risk_factors || [];
+                        return factors.some((f: string) => f.toLowerCase().includes('benford'));
+                    }).slice(0, 100);
+                    break;
+
+                default:
+                    console.warn('Tipo de detalle no reconocido:', type);
+                    rows = [];
             }
 
-            const { data: rows, error } = await query.limit(100);
-
-            if (error) throw error;
-            setDetailItems((rows || []).map(r => ({
+            // Transformar los datos para el modal
+            setDetailItems(rows.map(r => ({
                 id: r.unique_id_col,
                 value: r.monetary_value_col ?? 0,
-                raw: r.raw_json
+                raw: typeof r.raw_json === 'string' ? JSON.parse(r.raw_json) : r.raw_json
             })));
-        } catch (err) {
-            console.error("Error fetching details:", err);
+
+        } catch (error: any) {
+            console.error("Error fetching details:", error);
+            
+            let errorMessage = "Error al cargar detalles";
+            if (error instanceof FetchTimeoutError) {
+                errorMessage = "Timeout: La consulta tardó demasiado tiempo";
+            } else if (error instanceof FetchNetworkError) {
+                errorMessage = "Error de conexión: " + error.message;
+            } else {
+                errorMessage += ": " + (error.message || "Error desconocido");
+            }
+            
+            // Mostrar error en el modal en lugar de cerrar
+            setDetailItems([{
+                id: 'ERROR',
+                value: 0,
+                raw: { error: errorMessage }
+            }]);
         } finally {
             setIsLoadingDetails(false);
         }
@@ -255,7 +537,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
                     <div
                         onClick={() => handleInsightSelection('Benford')}
                         className={`cursor-pointer bg-white border rounded-2xl p-5 shadow-sm hover:shadow-md transition-all group ${selectedInsight === 'Benford' ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-slate-200'}`}
@@ -324,6 +606,105 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         <div className="text-center">
                             <div className="text-2xl font-black text-slate-800 leading-none">{analysis?.roundNumbersCount || 0}</div>
                             <div className="text-[8px] font-black text-slate-400 uppercase tracking-tighter mt-1">Hallazgos Redondos</div>
+                        </div>
+                    </div>
+
+                    <div
+                        onClick={() => handleInsightSelection('Entropy')}
+                        className={`cursor-pointer bg-white border rounded-2xl p-5 shadow-sm hover:shadow-md transition-all ${selectedInsight === 'Entropy' ? 'border-indigo-500 ring-2 ring-indigo-100 bg-indigo-50/10' : 'border-slate-200'}`}
+                    >
+                        <div className="flex justify-between items-center mb-6">
+                            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Entropía</h5>
+                            <button onClick={(e) => handleShowDetails(e, 'Entropy')} className="text-indigo-500 hover:text-indigo-600">
+                                <i className="fas fa-random"></i>
+                            </button>
+                        </div>
+                        <div className="text-center">
+                            <div className="text-2xl font-black text-indigo-600 leading-none">{getEntropyAnomalies()}</div>
+                            <div className="text-[8px] font-black text-slate-400 uppercase tracking-tighter mt-1">Anomalías Categóricas</div>
+                        </div>
+                    </div>
+
+                    <div
+                        onClick={() => handleInsightSelection('Splitting')}
+                        className={`cursor-pointer bg-white border rounded-2xl p-5 shadow-sm hover:shadow-md transition-all ${selectedInsight === 'Splitting' ? 'border-red-500 ring-2 ring-red-100 bg-red-50/10' : 'border-slate-200'}`}
+                    >
+                        <div className="flex justify-between items-center mb-6">
+                            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fraccionamiento</h5>
+                            <button onClick={(e) => handleShowDetails(e, 'Splitting')} className="text-red-500 hover:text-red-600">
+                                <i className="fas fa-cut"></i>
+                            </button>
+                        </div>
+                        <div className="text-center">
+                            <div className="text-2xl font-black text-red-600 leading-none">{getSplittingGroups()}</div>
+                            <div className="text-[8px] font-black text-slate-400 uppercase tracking-tighter mt-1">Grupos Sospechosos</div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Segunda fila de insights avanzados */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div
+                        onClick={() => handleInsightSelection('Sequential')}
+                        className={`cursor-pointer bg-white border rounded-2xl p-5 shadow-sm hover:shadow-md transition-all ${selectedInsight === 'Sequential' ? 'border-yellow-500 ring-2 ring-yellow-100 bg-yellow-50/10' : 'border-slate-200'}`}
+                    >
+                        <div className="flex justify-between items-center mb-6">
+                            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gaps Secuenciales</h5>
+                            <button onClick={(e) => handleShowDetails(e, 'Sequential')} className="text-yellow-500 hover:text-yellow-600">
+                                <i className="fas fa-list-ol"></i>
+                            </button>
+                        </div>
+                        <div className="text-center">
+                            <div className="text-2xl font-black text-yellow-600 leading-none">{getSequentialGaps()}</div>
+                            <div className="text-[8px] font-black text-slate-400 uppercase tracking-tighter mt-1">Gaps Críticos</div>
+                        </div>
+                    </div>
+
+                    <div
+                        onClick={() => handleInsightSelection('IsolationForest')}
+                        className={`cursor-pointer bg-white border rounded-2xl p-5 shadow-sm hover:shadow-md transition-all ${selectedInsight === 'IsolationForest' ? 'border-green-500 ring-2 ring-green-100 bg-green-50/10' : 'border-slate-200'}`}
+                    >
+                        <div className="flex justify-between items-center mb-6">
+                            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">ML Anomalías</h5>
+                            <button onClick={(e) => handleShowDetails(e, 'IsolationForest')} className="text-green-500 hover:text-green-600">
+                                <i className="fas fa-brain"></i>
+                            </button>
+                        </div>
+                        <div className="text-center">
+                            <div className="text-2xl font-black text-green-600 leading-none">{getIsolationForestAnomalies()}</div>
+                            <div className="text-[8px] font-black text-slate-400 uppercase tracking-tighter mt-1">Anomalías IA</div>
+                        </div>
+                    </div>
+
+                    <div
+                        onClick={() => handleInsightSelection('ActorProfiling')}
+                        className={`cursor-pointer bg-white border rounded-2xl p-5 shadow-sm hover:shadow-md transition-all ${selectedInsight === 'ActorProfiling' ? 'border-pink-500 ring-2 ring-pink-100 bg-pink-50/10' : 'border-slate-200'}`}
+                    >
+                        <div className="flex justify-between items-center mb-6">
+                            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Actores</h5>
+                            <button onClick={(e) => handleShowDetails(e, 'ActorProfiling')} className="text-pink-500 hover:text-pink-600">
+                                <i className="fas fa-user-secret"></i>
+                            </button>
+                        </div>
+                        <div className="text-center">
+                            <div className="text-2xl font-black text-pink-600 leading-none">{getSuspiciousActors()}</div>
+                            <div className="text-[8px] font-black text-slate-400 uppercase tracking-tighter mt-1">Usuarios Sospechosos</div>
+                        </div>
+                    </div>
+
+                    <div
+                        onClick={() => handleInsightSelection('EnhancedBenford')}
+                        className={`cursor-pointer bg-white border rounded-2xl p-5 shadow-sm hover:shadow-md transition-all ${selectedInsight === 'EnhancedBenford' ? 'border-violet-500 ring-2 ring-violet-100 bg-violet-50/10' : 'border-slate-200'}`}
+                    >
+                        <div className="flex justify-between items-center mb-6">
+                            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Benford Avanzado</h5>
+                            <button onClick={(e) => handleShowDetails(e, 'EnhancedBenford')} className="text-violet-500 hover:text-violet-600">
+                                <i className="fas fa-chart-line"></i>
+                            </button>
+                        </div>
+                        <div className="text-center">
+                            <div className="text-2xl font-black text-violet-600 leading-none">{getEnhancedBenfordDeviation().toFixed(1)}%</div>
+                            <div className="text-[8px] font-black text-slate-400 uppercase tracking-tighter mt-1">Desviación MAD</div>
                         </div>
                     </div>
                 </div>
@@ -707,29 +1088,78 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         <div className="bg-slate-50 p-4 rounded-xl flex justify-between items-center border border-slate-200">
                             <div>
                                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Hallazgos</p>
-                                <p className="text-2xl font-black text-slate-900">{detailItems.length}</p>
+                                <p className="text-2xl font-black text-slate-900">
+                                    {isLoadingDetails ? (
+                                        <span className="animate-pulse">...</span>
+                                    ) : (
+                                        detailItems.length
+                                    )}
+                                </p>
                             </div>
-                            <button
-                                onClick={() => {
-                                    const ws = utils.json_to_sheet(detailItems);
-                                    const wb = utils.book_new();
-                                    utils.book_append_sheet(wb, ws, "Hallazgos");
-                                    writeFile(wb, `AAMA_Forense_${detailType}.xlsx`);
-                                }}
-                                className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase shadow-md hover:bg-emerald-700"
-                            >
-                                <i className="fas fa-file-excel mr-2"></i> Exportar
-                            </button>
+                            <div className="flex gap-2">
+                                {isLoadingDetails && (
+                                    <div className="flex items-center gap-2 text-blue-600">
+                                        <i className="fas fa-circle-notch fa-spin"></i>
+                                        <span className="text-xs font-medium">Cargando...</span>
+                                    </div>
+                                )}
+                                <button
+                                    onClick={() => {
+                                        if (detailItems.length === 0 || isLoadingDetails) return;
+                                        
+                                        const exportData = detailItems.map(item => ({
+                                            ID: item.id,
+                                            Valor: item.value,
+                                            ...item.raw
+                                        }));
+                                        
+                                        const ws = utils.json_to_sheet(exportData);
+                                        const wb = utils.book_new();
+                                        utils.book_append_sheet(wb, ws, "Hallazgos");
+                                        writeFile(wb, `AAMA_Forense_${detailType}_${new Date().toISOString().split('T')[0]}.xlsx`);
+                                    }}
+                                    disabled={detailItems.length === 0 || isLoadingDetails}
+                                    className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase shadow-md hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-all"
+                                >
+                                    <i className="fas fa-file-excel mr-2"></i> Exportar
+                                </button>
+                            </div>
                         </div>
+                        
                         <div className="max-h-60 overflow-y-auto custom-scrollbar border rounded-2xl">
                             {isLoadingDetails ? (
-                                <div className="p-10 text-center text-slate-400">Cargando...</div>
+                                <div className="p-10 text-center">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                                    <p className="text-slate-400 text-sm">Cargando detalles...</p>
+                                    <p className="text-slate-300 text-xs mt-1">Esto puede tomar unos segundos</p>
+                                </div>
+                            ) : detailItems.length === 0 ? (
+                                <div className="p-10 text-center text-slate-400">
+                                    <i className="fas fa-search text-3xl mb-4 opacity-50"></i>
+                                    <p>No se encontraron registros para este análisis</p>
+                                </div>
+                            ) : detailItems[0]?.id === 'ERROR' ? (
+                                <div className="p-6 text-center">
+                                    <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                                        <i className="fas fa-exclamation-triangle text-red-500 text-2xl mb-2"></i>
+                                        <p className="text-red-800 font-medium text-sm">
+                                            {detailItems[0]?.raw?.error || 'Error al cargar los datos'}
+                                        </p>
+                                        <button
+                                            onClick={() => handleShowDetails({ stopPropagation: () => {} } as any, detailType)}
+                                            className="mt-3 bg-red-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-700 transition-all"
+                                        >
+                                            <i className="fas fa-redo mr-2"></i>Reintentar
+                                        </button>
+                                    </div>
+                                </div>
                             ) : (
                                 <table className="min-w-full divide-y divide-slate-100">
                                     <thead className="bg-slate-50">
                                         <tr>
                                             <th className="px-4 py-3 text-left text-[10px] font-black text-slate-500 uppercase">ID</th>
                                             <th className="px-4 py-3 text-right text-[10px] font-black text-slate-500 uppercase">Valor</th>
+                                            <th className="px-4 py-3 text-left text-[10px] font-black text-slate-500 uppercase">Detalles</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-50">
@@ -737,12 +1167,27 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                                             <tr key={idx} className="hover:bg-slate-50 transition-colors">
                                                 <td className="px-4 py-2 text-xs font-mono font-bold text-slate-600">{item.id}</td>
                                                 <td className="px-4 py-2 text-xs text-right font-black text-slate-900">${formatMoney(item.value)}</td>
+                                                <td className="px-4 py-2 text-xs text-slate-500 max-w-xs truncate">
+                                                    {item.raw && typeof item.raw === 'object' ? 
+                                                        Object.entries(item.raw).slice(0, 2).map(([k, v]) => `${k}: ${v}`).join(', ') : 
+                                                        'Sin detalles'
+                                                    }
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
                                 </table>
                             )}
                         </div>
+                        
+                        {detailItems.length > 50 && (
+                            <div className="text-center p-2 bg-amber-50 rounded-lg border border-amber-200">
+                                <p className="text-xs text-amber-800 font-medium">
+                                    <i className="fas fa-info-circle mr-1"></i>
+                                    Mostrando los primeros 50 de {detailItems.length} registros. Use "Exportar" para ver todos.
+                                </p>
+                            </div>
+                        )}
                     </div>
                 </Modal>
 
@@ -763,6 +1208,406 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         </div>
                     </div>
                 </Modal>
+
+                {/* Botones de Métodos Forenses Individuales */}
+                <div className="mt-8 space-y-6">
+                    <div className="flex items-center gap-3 mb-6">
+                        <div className="h-10 w-10 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg flex items-center justify-center text-white">
+                            <i className="fas fa-search text-sm"></i>
+                        </div>
+                        <div>
+                            <h4 className="text-lg font-bold text-gray-800">Métodos de Análisis Forense</h4>
+                            <p className="text-sm text-gray-600">Haga clic en cualquier método para ver su explicación detallada</p>
+                        </div>
+                    </div>
+
+                    {/* Grid de Métodos Forenses */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {/* Análisis de Entropía */}
+                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl group">
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
+                                    <i className="fas fa-microchip text-xs"></i>
+                                </div>
+                                <div className="flex-1">
+                                    <h5 className="font-bold text-blue-800 group-hover:text-blue-900">Análisis de Entropía</h5>
+                                    <div className="text-xs text-blue-600 font-medium">
+                                        {getEntropyAnomalies()} anomalías detectadas
+                                    </div>
+                                </div>
+                            </div>
+                            <p className="text-xs text-blue-700 leading-relaxed mb-3">Detecta anomalías en distribución de categorías</p>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => handleOpenMethodExplanation('entropy')}
+                                    className="flex-1 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs"
+                                >
+                                    <i className="fas fa-info-circle mr-1"></i>
+                                    Explicación
+                                </button>
+                                {getEntropyAnomalies() > 0 && (
+                                    <button
+                                        onClick={() => handleOpenAnomaliesModal('Entropy', 'Anomalías de Entropía')}
+                                        className="flex-1 px-3 py-1 bg-blue-100 text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-200 transition-colors text-xs"
+                                    >
+                                        <i className="fas fa-list mr-1"></i>
+                                        Ver Ítems
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Detección de Fraccionamiento */}
+                        <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl group">
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="h-8 w-8 bg-yellow-600 rounded-lg flex items-center justify-center text-white">
+                                    <i className="fas fa-scissors text-xs"></i>
+                                </div>
+                                <div className="flex-1">
+                                    <h5 className="font-bold text-yellow-800 group-hover:text-yellow-900">Fraccionamiento</h5>
+                                    <div className="text-xs text-yellow-600 font-medium">
+                                        {getSplittingGroups()} grupos de riesgo detectados
+                                    </div>
+                                </div>
+                            </div>
+                            <p className="text-xs text-yellow-700 leading-relaxed mb-3">Identifica transacciones divididas para evadir controles</p>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => handleOpenMethodExplanation('splitting')}
+                                    className="flex-1 px-3 py-1 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-xs"
+                                >
+                                    <i className="fas fa-info-circle mr-1"></i>
+                                    Explicación
+                                </button>
+                                {getSplittingGroups() > 0 && (
+                                    <button
+                                        onClick={() => handleOpenAnomaliesModal('Splitting', 'Anomalías de Fraccionamiento')}
+                                        className="flex-1 px-3 py-1 bg-yellow-100 text-yellow-700 border border-yellow-300 rounded-lg hover:bg-yellow-200 transition-colors text-xs"
+                                    >
+                                        <i className="fas fa-list mr-1"></i>
+                                        Ver Ítems
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Integridad Secuencial */}
+                        <div className="p-4 bg-red-50 border border-red-200 rounded-xl group">
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="h-8 w-8 bg-red-600 rounded-lg flex items-center justify-center text-white">
+                                    <i className="fas fa-barcode text-xs"></i>
+                                </div>
+                                <div className="flex-1">
+                                    <h5 className="font-bold text-red-800 group-hover:text-red-900">Gaps Secuenciales</h5>
+                                    <div className="text-xs text-red-600 font-medium">
+                                        {getSequentialGaps()} gaps de riesgo detectados
+                                    </div>
+                                </div>
+                            </div>
+                            <p className="text-xs text-red-700 leading-relaxed mb-3">Detecta documentos faltantes en secuencias</p>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => handleOpenMethodExplanation('sequential')}
+                                    className="flex-1 px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs"
+                                >
+                                    <i className="fas fa-info-circle mr-1"></i>
+                                    Explicación
+                                </button>
+                                {getSequentialGaps() > 0 && (
+                                    <button
+                                        onClick={() => handleOpenAnomaliesModal('Sequential', 'Gaps Secuenciales')}
+                                        className="flex-1 px-3 py-1 bg-red-100 text-red-700 border border-red-300 rounded-lg hover:bg-red-200 transition-colors text-xs"
+                                    >
+                                        <i className="fas fa-list mr-1"></i>
+                                        Ver Ítems
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Isolation Forest */}
+                        <div className="p-4 bg-purple-50 border border-purple-200 rounded-xl group">
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="h-8 w-8 bg-purple-600 rounded-lg flex items-center justify-center text-white">
+                                    <i className="fas fa-brain text-xs"></i>
+                                </div>
+                                <div className="flex-1">
+                                    <h5 className="font-bold text-purple-800 group-hover:text-purple-900">Isolation Forest</h5>
+                                    <div className="text-xs text-purple-600 font-medium">
+                                        {getIsolationForestAnomalies()} anomalías ML detectadas
+                                    </div>
+                                </div>
+                            </div>
+                            <p className="text-xs text-purple-700 leading-relaxed mb-3">Machine Learning para anomalías multidimensionales</p>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => handleOpenMethodExplanation('isolationForest')}
+                                    className="flex-1 px-3 py-1 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-xs"
+                                >
+                                    <i className="fas fa-info-circle mr-1"></i>
+                                    Explicación
+                                </button>
+                                {getIsolationForestAnomalies() > 0 && (
+                                    <button
+                                        onClick={() => handleOpenAnomaliesModal('IsolationForest', 'Anomalías ML')}
+                                        className="flex-1 px-3 py-1 bg-purple-100 text-purple-700 border border-purple-300 rounded-lg hover:bg-purple-200 transition-colors text-xs"
+                                    >
+                                        <i className="fas fa-list mr-1"></i>
+                                        Ver Ítems
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Actor Profiling */}
+                        <div className="p-4 bg-orange-50 border border-orange-200 rounded-xl group">
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="h-8 w-8 bg-orange-600 rounded-lg flex items-center justify-center text-white">
+                                    <i className="fas fa-user-secret text-xs"></i>
+                                </div>
+                                <div className="flex-1">
+                                    <h5 className="font-bold text-orange-800 group-hover:text-orange-900">Perfilado de Actores</h5>
+                                    <div className="text-xs text-orange-600 font-medium">
+                                        {getSuspiciousActors()} actores sospechosos detectados
+                                    </div>
+                                </div>
+                            </div>
+                            <p className="text-xs text-orange-700 leading-relaxed mb-3">Analiza comportamientos sospechosos de usuarios</p>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => handleOpenMethodExplanation('actorProfiling')}
+                                    className="flex-1 px-3 py-1 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-xs"
+                                >
+                                    <i className="fas fa-info-circle mr-1"></i>
+                                    Explicación
+                                </button>
+                                {getSuspiciousActors() > 0 && (
+                                    <button
+                                        onClick={() => handleOpenAnomaliesModal('ActorProfiling', 'Actores Sospechosos')}
+                                        className="flex-1 px-3 py-1 bg-orange-100 text-orange-700 border border-orange-300 rounded-lg hover:bg-orange-200 transition-colors text-xs"
+                                    >
+                                        <i className="fas fa-list mr-1"></i>
+                                        Ver Ítems
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Enhanced Benford */}
+                        <div className="p-4 bg-green-50 border border-green-200 rounded-xl group">
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="h-8 w-8 bg-green-600 rounded-lg flex items-center justify-center text-white">
+                                    <i className="fas fa-calculator text-xs"></i>
+                                </div>
+                                <div className="flex-1">
+                                    <h5 className="font-bold text-green-800 group-hover:text-green-900">Benford Mejorado</h5>
+                                    <div className="text-xs text-green-600 font-medium">
+                                        {getEnhancedBenfordDeviation().toFixed(1)}% desviación detectada
+                                    </div>
+                                </div>
+                            </div>
+                            <p className="text-xs text-green-700 leading-relaxed mb-3">Análisis avanzado de primer y segundo dígito</p>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => handleOpenMethodExplanation('enhancedBenford')}
+                                    className="flex-1 px-3 py-1 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs"
+                                >
+                                    <i className="fas fa-info-circle mr-1"></i>
+                                    Explicación
+                                </button>
+                                {getEnhancedBenfordDeviation() > 0 && (
+                                    <button
+                                        onClick={() => handleOpenAnomaliesModal('EnhancedBenford', 'Anomalías Benford Mejorado')}
+                                        className="flex-1 px-3 py-1 bg-green-100 text-green-700 border border-green-300 rounded-lg hover:bg-green-200 transition-colors text-xs"
+                                    >
+                                        <i className="fas fa-list mr-1"></i>
+                                        Ver Ítems
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Benford Básico */}
+                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl group">
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
+                                    <i className="fas fa-chart-bar text-xs"></i>
+                                </div>
+                                <div className="flex-1">
+                                    <h5 className="font-bold text-blue-800 group-hover:text-blue-900">Ley de Benford</h5>
+                                    <div className="text-xs text-blue-600 font-medium">
+                                        {getBenfordAnomalyCount()} anomalías detectadas
+                                    </div>
+                                </div>
+                            </div>
+                            <p className="text-xs text-blue-700 leading-relaxed mb-3">Detecta anomalías en primer dígito</p>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => handleOpenMethodExplanation('benford')}
+                                    className="flex-1 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs"
+                                >
+                                    <i className="fas fa-info-circle mr-1"></i>
+                                    Explicación
+                                </button>
+                                {getBenfordAnomalyCount() > 0 && (
+                                    <button
+                                        onClick={() => handleOpenAnomaliesModal('Benford', 'Anomalías Ley de Benford')}
+                                        className="flex-1 px-3 py-1 bg-blue-100 text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-200 transition-colors text-xs"
+                                    >
+                                        <i className="fas fa-list mr-1"></i>
+                                        Ver Ítems
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Duplicados */}
+                        <div className="p-4 bg-red-50 border border-red-200 rounded-xl group">
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="h-8 w-8 bg-red-600 rounded-lg flex items-center justify-center text-white">
+                                    <i className="fas fa-copy text-xs"></i>
+                                </div>
+                                <div className="flex-1">
+                                    <h5 className="font-bold text-red-800 group-hover:text-red-900">Duplicados</h5>
+                                    <div className="text-xs text-red-600 font-medium">
+                                        {analysis?.duplicatesCount || 0} duplicados detectados
+                                    </div>
+                                </div>
+                            </div>
+                            <p className="text-xs text-red-700 leading-relaxed mb-3">Detección inteligente de transacciones repetidas</p>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => handleOpenMethodExplanation('duplicates')}
+                                    className="flex-1 px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs"
+                                >
+                                    <i className="fas fa-info-circle mr-1"></i>
+                                    Explicación
+                                </button>
+                                {(analysis?.duplicatesCount || 0) > 0 && (
+                                    <button
+                                        onClick={() => handleOpenAnomaliesModal('Duplicates', 'Transacciones Duplicadas')}
+                                        className="flex-1 px-3 py-1 bg-red-100 text-red-700 border border-red-300 rounded-lg hover:bg-red-200 transition-colors text-xs"
+                                    >
+                                        <i className="fas fa-list mr-1"></i>
+                                        Ver Ítems
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Outliers */}
+                        <div className="p-4 bg-orange-50 border border-orange-200 rounded-xl group">
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="h-8 w-8 bg-orange-600 rounded-lg flex items-center justify-center text-white">
+                                    <i className="fas fa-expand-arrows-alt text-xs"></i>
+                                </div>
+                                <div className="flex-1">
+                                    <h5 className="font-bold text-orange-800 group-hover:text-orange-900">Valores Atípicos</h5>
+                                    <div className="text-xs text-orange-600 font-medium">
+                                        {analysis?.outliersCount || 0} outliers detectados
+                                    </div>
+                                </div>
+                            </div>
+                            <p className="text-xs text-orange-700 leading-relaxed mb-3">Detecta outliers usando método IQR</p>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => handleOpenMethodExplanation('outliers')}
+                                    className="flex-1 px-3 py-1 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-xs"
+                                >
+                                    <i className="fas fa-info-circle mr-1"></i>
+                                    Explicación
+                                </button>
+                                {(analysis?.outliersCount || 0) > 0 && (
+                                    <button
+                                        onClick={() => handleOpenAnomaliesModal('Outliers', 'Valores Atípicos')}
+                                        className="flex-1 px-3 py-1 bg-orange-100 text-orange-700 border border-orange-300 rounded-lg hover:bg-orange-200 transition-colors text-xs"
+                                    >
+                                        <i className="fas fa-list mr-1"></i>
+                                        Ver Ítems
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Botón de Análisis Forense Completo */}
+                <div className="mt-8 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-2xl p-6">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                            <div className="h-12 w-12 bg-gradient-to-r from-purple-600 to-blue-600 rounded-xl flex items-center justify-center text-white mr-4">
+                                <i className="fas fa-microscope text-lg"></i>
+                            </div>
+                            <div>
+                                <h4 className="text-lg font-bold text-gray-800">Análisis Forense Completo</h4>
+                                <p className="text-sm text-gray-600">
+                                    Ejecutar análisis avanzado con 9 modelos de detección de anomalías
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex space-x-3">
+                            <button
+                                onClick={handleOpenForensicConfig}
+                                className="px-4 py-2 text-purple-600 border border-purple-300 rounded-lg hover:bg-purple-50 transition-colors"
+                                disabled={isRunningForensicAnalysis}
+                            >
+                                <i className="fas fa-cog mr-2"></i>
+                                Configurar
+                            </button>
+                            <button
+                                onClick={() => handleRunForensicAnalysis()}
+                                className="px-6 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 transition-all shadow-md"
+                                disabled={isRunningForensicAnalysis}
+                            >
+                                {isRunningForensicAnalysis ? (
+                                    <>
+                                        <i className="fas fa-spinner fa-spin mr-2"></i>
+                                        Analizando...
+                                    </>
+                                ) : (
+                                    <>
+                                        <i className="fas fa-play mr-2"></i>
+                                        Ejecutar Análisis
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Modal de Configuración Forense */}
+                {forensicConfigOpen && (
+                    <ForensicConfigModal
+                        isOpen={forensicConfigOpen}
+                        onClose={() => setForensicConfigOpen(false)}
+                        onSave={handleSaveForensicConfig}
+                    />
+                )}
+
+                {/* Modal de Resultados Forenses */}
+                {forensicResultsOpen && forensicResults && appState.selectedPopulation && (
+                    <ForensicResultsView
+                        population={appState.selectedPopulation}
+                        analysis={forensicResults}
+                        onClose={() => setForensicResultsOpen(false)}
+                    />
+                )}
+
+                {/* Modal Explicativo de Métodos Forenses */}
+                <ForensicExplanationModal
+                    isOpen={explanationModalOpen}
+                    onClose={() => setExplanationModalOpen(false)}
+                    method={selectedMethod ? FORENSIC_METHODS[selectedMethod] : null}
+                />
+
+                {/* Modal de Anomalías Detectadas */}
+                <ForensicAnomaliesModal
+                    isOpen={anomaliesModalOpen}
+                    onClose={() => setAnomaliesModalOpen(false)}
+                    analysisType={selectedAnomalyType || ''}
+                    populationId={appState.selectedPopulation?.id || ''}
+                    title={selectedAnomalyTitle}
+                />
             </div>
         </>
     );

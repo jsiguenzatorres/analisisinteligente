@@ -13,6 +13,7 @@ import { supabase } from '../../services/supabaseClient';
 import SampleHistoryManager from './SampleHistoryManager';
 import { useToast } from '../ui/ToastContext';
 import StratumAllocationPreview from './StratumAllocationPreview';
+import { samplingProxyFetch, FetchTimeoutError, FetchNetworkError } from '../../services/fetchUtils';
 
 interface Props {
     appState: AppState;
@@ -53,11 +54,19 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
         setLoading(true);
 
         try {
-            // Use Proxy to check history (Bypass Firewall)
-            const res = await fetch(`/api/sampling_proxy?action=get_history&population_id=${appState.selectedPopulation.id}`);
-            if (!res.ok) throw new Error('Failed to check history');
+            // Usar timeout más corto para verificación de historial
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 segundos
 
-            const { history } = await res.json();
+            const { history } = await samplingProxyFetch('get_history', {
+                population_id: appState.selectedPopulation.id
+            }, { 
+                timeout: 8000,
+                signal: controller.signal 
+            });
+
+            clearTimeout(timeoutId);
+            
             const hasCurrent = history && history.some((h: any) => h.is_current);
 
             if (hasCurrent) {
@@ -68,13 +77,32 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                 await handleRunSampling(true);
             }
         } catch (err: any) {
-            addToast("Error al verificar historial: " + err.message, 'error');
+            let errorMessage = "Error al verificar historial";
+            
+            if (err.name === 'AbortError') {
+                errorMessage = "Operación cancelada por timeout (15s)";
+            } else if (err instanceof FetchTimeoutError) {
+                errorMessage = "Timeout: La consulta tardó demasiado. Verifique su conexión.";
+            } else if (err instanceof FetchNetworkError) {
+                errorMessage = "Error de conexión: " + err.message;
+            } else {
+                errorMessage += ": " + (err.message || "Error desconocido");
+            }
+            
+            addToast(errorMessage, 'error');
             setLoading(false);
         }
     };
 
     const handleRunSampling = async (isFinal: boolean, manualAllocations?: Record<string, number>) => {
         if (!appState.selectedPopulation) return;
+        
+        // 🔒 PROTECCIÓN CRÍTICA: Evitar múltiples ejecuciones
+        if (loading) {
+            console.warn("⚠️ Ejecución ya en progreso, ignorando click adicional");
+            return;
+        }
+        
         setLoading(true);
         setShowConfirmModal(false);
         setShowReplaceWarning(false);
@@ -92,11 +120,70 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
         }
 
         try {
-            // Use Proxy for fetching data (Bypass Firewall)
-            const res = await fetch(`/api/sampling_proxy?action=get_universe&population_id=${appState.selectedPopulation.id}`);
-            if (!res.ok) throw new Error('Failed to fetch population data via proxy');
+            console.log("🌐 Iniciando carga de datos (versión anti-bucle)...");
+            console.log("⏰ Inicio:", new Date().toLocaleString());
+            console.log("🎯 Método:", appState.samplingMethod);
+            
+            const expectedRows = appState.selectedPopulation.total_rows || 1500;
+            
+            // Advertencia específica para MUS
+            if (appState.samplingMethod === "MUS" && appState.samplingParams?.mus?.TE < 50000) {
+                console.warn("⚠️ MUS: TE muy pequeño puede causar problemas");
+                addToast("Advertencia: TE pequeño puede causar muestras excesivas en MUS", "warning");
+            }
+            console.log(`📊 Población esperada: ${expectedRows} registros`);
 
-            const { rows: realRows } = await res.json();
+            // SOLUCIÓN AL BUCLE INFINITO: Límites estrictos y validación
+            const startTime = Date.now();
+            
+            const { rows: realRows } = await samplingProxyFetch('get_universe', {
+                population_id: appState.selectedPopulation.id
+            }, { 
+                timeout: 10000 // Timeout reducido a 10 segundos
+            });
+
+            const loadTime = Date.now() - startTime;
+            console.log(`⏱️ Tiempo de carga: ${loadTime}ms`);
+
+            // Verificar que tenemos datos válidos
+            if (!realRows || realRows.length === 0) {
+                throw new Error('No se encontraron datos en la población seleccionada');
+            }
+
+            console.log(`✅ Datos obtenidos: ${realRows.length} registros`);
+
+            // VALIDACIÓN CRÍTICA: Detectar inconsistencias que causan bucles
+            const ratio = realRows.length / expectedRows;
+            console.log(`📈 Ratio obtenido/esperado: ${ratio.toFixed(2)}`);
+
+            if (ratio > 3) {
+                console.error(`🚨 DATOS INCONSISTENTES: ratio ${ratio.toFixed(2)} demasiado alto`);
+                throw new Error(`Error de datos: se obtuvieron ${realRows.length} registros pero se esperaban ${expectedRows}. Ratio: ${ratio.toFixed(2)}`);
+            }
+
+            // Aplicar límite de seguridad SIEMPRE
+            const SAFETY_LIMIT = 15000; // Límite más conservador
+            let limitedRows = realRows.slice(0, SAFETY_LIMIT);
+            
+            if (realRows.length > SAFETY_LIMIT) {
+                addToast(`Población limitada a ${SAFETY_LIMIT} registros para evitar bucles infinitos (original: ${realRows.length}).`, 'warning');
+                console.warn(`⚠️ Población limitada: ${realRows.length} → ${limitedRows.length} registros`);
+            }
+
+            // Validar que los datos no están corruptos
+            const validRows = limitedRows.filter(row => 
+                row && 
+                typeof row === 'object' && 
+                row.unique_id_col !== undefined &&
+                typeof row.monetary_value_col === 'number'
+            );
+
+            if (validRows.length !== limitedRows.length) {
+                console.warn(`⚠️ Datos corruptos detectados: ${limitedRows.length - validRows.length} registros inválidos`);
+                limitedRows = validRows;
+            }
+
+            console.log(`🔢 Procesando ${limitedRows.length} registros válidos`);
 
             // Use updated appState with manualAllocations if applicable
             const currentAppState = manualAllocations ? {
@@ -107,72 +194,42 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                 }
             } : appState;
 
-            const results = calculateSampleSize(currentAppState, realRows || []);
+            // PROTECCIÓN ADICIONAL: Timeout para calculateSampleSize
+            const calcStartTime = Date.now();
+            let results;
+            
+            try {
+                results = calculateSampleSize(currentAppState, limitedRows);
+                const calcTime = Date.now() - calcStartTime;
+                console.log(`⚡ Cálculo completado en ${calcTime}ms`);
+                
+                if (calcTime > 10000) { // Más de 10 segundos es sospechoso
+                    console.warn(`⚠️ Cálculo lento detectado: ${calcTime}ms`);
+                }
+            } catch (calcError) {
+                console.error('❌ Error en calculateSampleSize:', calcError);
+                throw new Error(`Error en cálculo estadístico: ${calcError.message}`);
+            }
 
             // Adjuntar las observaciones al snapshot de resultados para el reporte
             results.observations = appState.observations;
 
-            // ... (rest of the logic remains similar but ensures result.sampling_params is correct)
-
-            if (isFinal) {
-                await supabase
-                    .from('audit_historical_samples')
-                    .update({ is_current: false })
-                    .eq('population_id', appState.selectedPopulation.id)
-                    .eq('is_current', true);
-
-                const historicalData = {
-                    population_id: appState.selectedPopulation.id,
-                    method: appState.samplingMethod,
-                    objective: appState.generalParams.objective,
-                    seed: appState.generalParams.seed,
-                    sample_size: results.sampleSize,
-                    params_snapshot: appState.samplingParams,
-                    results_snapshot: results,
-                    is_final: true,
-                    is_current: true
-                };
-
-                // Use Proxy for Saving to avoid Firewall issues
-                const savePayload = {
-                    population_id: appState.selectedPopulation.id,
-                    method: appState.samplingMethod,
-                    sample_data: historicalData,
-                    is_final: true
-                };
-
-                const saveRes = await fetch('/api/sampling_proxy?action=save_sample', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(savePayload)
-                });
-
-                if (!saveRes.ok) throw new Error(await saveRes.text());
-
-                const savedSample = await saveRes.json();
-
-                // if (saveError) throw saveError; // Handled by proxy check above
-
-                setAppState(prev => {
-                    const currentMethodResults = {
-                        ...results,
-                        method: prev.samplingMethod,
-                        sampling_params: prev.samplingParams
-                    };
-                    return {
-                        ...prev,
-                        results,
-                        isLocked: true,
-                        isCurrentVersion: true,
-                        historyId: savedSample.id,
-                        full_results_storage: {
-                            ...(prev.full_results_storage || {}),
-                            [prev.samplingMethod]: currentMethodResults,
-                            last_method: prev.samplingMethod
-                        }
-                    };
-                });
-            } else {
+            // 🎯 SOLUCIÓN DEFINITIVA: Guardado inteligente según entorno (RLS corregido)
+            const isDevelopment = window.location.hostname === 'localhost';
+            const forceSkipSave = localStorage.getItem('SKIP_SAVE_MODE') === 'true';
+            
+            // En producción, SIEMPRE intentar guardar (RLS ya corregido)
+            // En desarrollo, usar modo emergencia solo si está activado manualmente
+            const shouldSkipSave = isDevelopment && forceSkipSave;
+            
+            if (shouldSkipSave || !isFinal) {
+                console.log("🚨 MODO SIN GUARDADO: Saltando persistencia en BD");
+                if (shouldSkipSave) {
+                    addToast("Modo emergencia activado: Sin guardado en BD", "warning");
+                } else if (!isFinal) {
+                    addToast("Modo simulación: Muestra temporal generada", "info");
+                }
+                
                 setAppState(prev => {
                     const currentMethodResults = {
                         ...results,
@@ -191,17 +248,132 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                         }
                     };
                 });
+            } else {
+                // 🎯 GUARDADO EN PRODUCCIÓN Y DESARROLLO (RLS corregido)
+                try {
+                    console.log("🔄 Iniciando guardado en base de datos (RLS corregido)...");
+                    
+                    await supabase
+                        .from('audit_historical_samples')
+                        .update({ is_current: false })
+                        .eq('population_id', appState.selectedPopulation.id)
+                        .eq('is_current', true);
+
+                    console.log("✅ Actualización de históricos completada");
+
+                    const historicalData = {
+                        population_id: appState.selectedPopulation.id,
+                        method: appState.samplingMethod,
+                        objective: appState.generalParams.objective,
+                        seed: appState.generalParams.seed,
+                        sample_size: results.sampleSize,
+                        params_snapshot: appState.samplingParams,
+                        results_snapshot: results,
+                        is_final: true,
+                        is_current: true
+                    };
+
+                    console.log("🔄 Guardando muestra vía proxy (RLS corregido)...");
+                    const saveStartTime = Date.now();
+                    
+                    const savedSample = await samplingProxyFetch('save_sample', {
+                        population_id: appState.selectedPopulation.id,
+                        method: appState.samplingMethod,
+                        sample_data: historicalData,
+                        is_final: true
+                    }, { 
+                        method: 'POST',
+                        timeout: 8000 // Timeout MÁS agresivo para detectar cuelgues
+                    });
+
+                    const saveTime = Date.now() - saveStartTime;
+                    console.log(`✅ Guardado completado en ${saveTime}ms`);
+
+                    setAppState(prev => {
+                        const currentMethodResults = {
+                            ...results,
+                            method: prev.samplingMethod,
+                            sampling_params: prev.samplingParams
+                        };
+                        return {
+                            ...prev,
+                            results,
+                            isLocked: true,
+                            isCurrentVersion: true,
+                            historyId: savedSample.id,
+                            full_results_storage: {
+                                ...(prev.full_results_storage || {}),
+                                [prev.samplingMethod]: currentMethodResults,
+                                last_method: prev.samplingMethod
+                            }
+                        };
+                    });
+                    
+                    console.log("✅ Estado actualizado correctamente");
+                    addToast("✅ Muestra guardada exitosamente en base de datos", "success");
+                } catch (saveError) {
+                    console.error("❌ Error al guardar:", saveError);
+                    
+                    // 🔧 FALLBACK: Si falla el guardado, continuar sin guardar
+                    addToast("Advertencia: No se pudo guardar en base de datos, pero la muestra se generó correctamente", "warning");
+                    
+                    setAppState(prev => {
+                        const currentMethodResults = {
+                            ...results,
+                            method: prev.samplingMethod,
+                            sampling_params: prev.samplingParams
+                        };
+                        return {
+                            ...prev,
+                            results,
+                            isLocked: false, // No locked si no se guardó
+                            isCurrentVersion: false,
+                            full_results_storage: {
+                                ...(prev.full_results_storage || {}),
+                                [prev.samplingMethod]: currentMethodResults,
+                                last_method: prev.samplingMethod
+                            }
+                        };
+                    });
+                    
+                    console.log("⚠️ Continuando sin guardar en BD");
+                }
             }
+            
+            const totalTime = Date.now() - startTime;
+            console.log(`🎉 Proceso completado en ${totalTime}ms`);
+            
+            // 🔧 FIX: setLoading(false) ANTES de onComplete() para evitar botón pegado
+            setLoading(false);
             onComplete();
-        } catch (error: any) {
+            
+        } catch (error) {
             console.error("Error en flujo de muestreo:", error);
-            addToast(`ERROR EN EL PROCESO: ${error?.message || "Error inesperado"}`, 'error');
+            
+            let errorMessage = "Error inesperado en el proceso";
+            
+            if (error instanceof FetchTimeoutError) {
+                errorMessage = "Timeout: La operación tardó más de 30 segundos. Intente con una población más pequeña.";
+            } else if (error instanceof FetchNetworkError) {
+                errorMessage = "Error de conexión: " + error.message;
+            } else if (error.message?.includes('calculateSampleSize')) {
+                errorMessage = "Error en el cálculo estadístico: " + error.message;
+            } else if (error.message?.includes('datos inconsistentes') || error.message?.includes('Error de datos')) {
+                errorMessage = "Error de datos: " + error.message + ". Contacte al administrador.";
+            } else if (error.message?.includes('No se encontraron datos')) {
+                errorMessage = "No hay datos disponibles en la población seleccionada";
+            } else {
+                errorMessage = error?.message || errorMessage;
+            }
+            
+            addToast(`ERROR: ${errorMessage}`, 'error');
         } finally {
+            // 🔧 Solo resetear loading si no se ejecutó onComplete() exitosamente
             setLoading(false);
         }
     };
 
-    const onLoadHistory = (sample: HistoricalSample) => {
+const onLoadHistory = (sample: HistoricalSample) => {
         setAppState(prev => ({
             ...prev,
             samplingMethod: sample.method,
@@ -213,6 +385,9 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
             isCurrentVersion: sample.is_current,
             historyId: sample.id
         }));
+        
+        // 🔧 FIX: Asegurar que loading se resetee antes de cambiar vista
+        setLoading(false);
         onComplete();
     };
 
@@ -321,6 +496,29 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                 </div>
 
                 <div className="px-8 py-6 bg-slate-50 border-t border-slate-100 flex justify-end items-center space-x-4">
+                    {/* 🚨 BOTÓN DE EMERGENCIA */}
+                    {window.location.hostname === 'localhost' && (
+                        <button
+                            onClick={() => {
+                                const isActive = localStorage.getItem('SKIP_SAVE_MODE') === 'true';
+                                if (isActive) {
+                                    localStorage.removeItem('SKIP_SAVE_MODE');
+                                    addToast("Modo emergencia desactivado", "info");
+                                } else {
+                                    localStorage.setItem('SKIP_SAVE_MODE', 'true');
+                                    addToast("Modo emergencia activado - Sin guardado en BD", "warning");
+                                }
+                            }}
+                            className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+                                localStorage.getItem('SKIP_SAVE_MODE') === 'true' 
+                                    ? 'bg-red-500 text-white' 
+                                    : 'bg-gray-200 text-gray-600 hover:bg-red-100'
+                            }`}
+                        >
+                            🚨 {localStorage.getItem('SKIP_SAVE_MODE') === 'true' ? 'MODO EMERGENCIA ON' : 'Activar Emergencia'}
+                        </button>
+                    )}
+                    
                     {appState.results && (
                         <button
                             onClick={onComplete}
@@ -402,8 +600,13 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
 
                     <div className="grid grid-cols-1 gap-5">
                         <button
-                            onClick={checkExistingAndLock}
-                            className="group text-left border-2 border-slate-100 rounded-3xl p-6 hover:border-blue-500 hover:bg-blue-50 transition-all shadow-sm hover:shadow-xl transform hover:-translate-y-1"
+                            onClick={() => {
+                                // 🔒 PROTECCIÓN: Evitar múltiples clicks
+                                if (loading) return;
+                                checkExistingAndLock();
+                            }}
+                            disabled={loading}
+                            className="group text-left border-2 border-slate-100 rounded-3xl p-6 hover:border-blue-500 hover:bg-blue-50 transition-all shadow-sm hover:shadow-xl transform hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <div className="flex items-center gap-6">
                                 <div className="h-16 w-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-all shadow-inner">
@@ -420,8 +623,13 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                         </button>
 
                         <button
-                            onClick={() => handleRunSampling(false)}
-                            className="group text-left border-2 border-slate-100 rounded-3xl p-6 hover:border-slate-800 hover:bg-slate-50 transition-all shadow-sm hover:shadow-xl transform hover:-translate-y-1"
+                            onClick={() => {
+                                // 🔒 PROTECCIÓN: Evitar múltiples clicks
+                                if (loading) return;
+                                handleRunSampling(false);
+                            }}
+                            disabled={loading}
+                            className="group text-left border-2 border-slate-100 rounded-3xl p-6 hover:border-slate-800 hover:bg-slate-50 transition-all shadow-sm hover:shadow-xl transform hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <div className="flex items-center gap-6">
                                 <div className="h-16 w-16 bg-slate-100 text-slate-400 rounded-2xl flex items-center justify-center group-hover:bg-slate-800 group-hover:text-white transition-all shadow-inner">

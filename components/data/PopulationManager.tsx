@@ -5,8 +5,8 @@ import { supabase } from '../../services/supabaseClient';
 import Card from '../ui/Card';
 import { useToast } from '../ui/ToastContext';
 import Modal from '../ui/Modal';
-
 import { useAuth } from '../../services/AuthContext';
+import { samplingProxyFetch, FetchTimeoutError, FetchNetworkError } from '../../services/fetchUtils';
 
 interface Props {
     onPopulationSelected: (population: AuditPopulation) => void;
@@ -19,6 +19,7 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, fileName: string } | null>(null);
+    const [isRefreshing, setIsRefreshing] = useState(false); // Prevenir múltiples requests
     const { addToast } = useToast();
 
     useEffect(() => {
@@ -33,49 +34,64 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
     }, [user?.id, authLoading]); // USAMOS user.id (primitivo) PARA EVITAR LOOPS INFINITOS
 
     const fetchPopulations = async () => {
+        // Prevenir múltiples requests simultáneos
+        if (isRefreshing) {
+            console.log("⚠️ Ya hay una consulta en progreso, ignorando...");
+            return;
+        }
+        
+        setIsRefreshing(true);
         setLoading(true);
         setError(null);
+        
         try {
-            // Attempt 1: Try Proxy (Firewall Bypass)
-            // ADDED TIMEOUT: If proxy hangs (e.g. wrong Vercel URL), fail fast (5s)
-            console.log("🌐 Intentando cargar poblaciones vía Proxy...");
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 20000); // Increased to 20s for Cold Starts
-
-            try {
-                const res = await fetch('/api/sampling_proxy?action=get_populations', { signal: controller.signal });
-                clearTimeout(timeoutId);
-
-                if (res.ok) {
-                    const { populations: data } = await res.json();
-                    setPopulations(data || []);
-                    return;
-                }
-                throw new Error(`Proxy failed (${res.status})`);
-            } catch (fetchErr: any) {
-                if (fetchErr.name === 'AbortError') throw new Error("Proxy Timeout (5s)");
-                throw fetchErr;
+            console.log("🌐 Cargando poblaciones vía proxy...");
+            
+            const { populations: data } = await samplingProxyFetch('get_populations', {}, {
+                timeout: 60000 // Timeout de 60 segundos para poblaciones
+            });
+            
+            setPopulations(data || []);
+            
+        } catch (error: any) {
+            console.error("Error fetching populations:", error);
+            
+            let errorMessage = "No se pudieron cargar los proyectos";
+            
+            if (error instanceof FetchTimeoutError) {
+                errorMessage = "Timeout: La carga tardó más de 60 segundos. Intente nuevamente.";
+            } else if (error instanceof FetchNetworkError) {
+                errorMessage = "Error de conexión: " + error.message;
+            } else {
+                errorMessage += ": " + (error.message || "Error desconocido");
             }
+            
+            setError(errorMessage);
+            
+            // Fallback: Intentar conexión directa como último recurso (solo si no es timeout)
+            if (!(error instanceof FetchTimeoutError)) {
+                console.warn("⚠️ Intentando fallback directo a Supabase...");
+                try {
+                    const { data, error: directError } = await supabase
+                        .from('audit_populations')
+                        .select('*')
+                        .order('created_at', { ascending: false })
+                        .limit(100); // Limitar para evitar sobrecarga
 
-        } catch (proxyErr: any) {
-            console.warn(`⚠️ Proxy Fetch Failed (${proxyErr.message}), trying Direct Fallback...`);
-
-            // Attempt 2: Direct Supabase Fetch (Fallback for Localhost)
-            try {
-                const { data, error } = await supabase
-                    .from('audit_populations')
-                    .select('*')
-                    .order('created_at', { ascending: false });
-
-                if (error) throw error;
-                setPopulations(data as AuditPopulation[]);
-
-            } catch (directErr: any) {
-                console.error("All fetch methods failed:", directErr);
-                setError('No se pudieron cargar los proyectos. Verifique su conexión.');
+                    if (directError) throw directError;
+                    
+                    setPopulations(data as AuditPopulation[]);
+                    setError(null); // Limpiar error si el fallback funciona
+                    console.log("✅ Fallback directo exitoso");
+                    
+                } catch (directErr: any) {
+                    console.error("❌ Fallback directo también falló:", directErr);
+                    // Mantener el error original del proxy
+                }
             }
         } finally {
             setLoading(false);
+            setIsRefreshing(false);
         }
     };
 
@@ -85,25 +101,31 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
         setDeleteConfirm(null);
 
         try {
-            // Use Centralized Proxy for Deletion
-            const res = await fetch('/api/sampling_proxy?action=delete_population', {
+            await samplingProxyFetch('delete_population', {
+                population_id: id
+            }, { 
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ population_id: id })
+                timeout: 30000 // 30 segundos para eliminación
             });
-
-            if (!res.ok) {
-                const errData = await res.json();
-                throw new Error(errData.error || 'Error deleting via proxy');
-            }
 
             // Actualizar estado local eliminando el item
             setPopulations(prev => prev.filter(p => p.id !== id));
             addToast("Población eliminada correctamente", 'success');
 
-        } catch (err: any) {
-            console.error("Error deleting:", err);
-            addToast("Error al eliminar el registro: " + err.message, 'error');
+        } catch (error: any) {
+            console.error("Error deleting:", error);
+            
+            let errorMessage = "Error al eliminar el registro";
+            
+            if (error instanceof FetchTimeoutError) {
+                errorMessage = "Timeout: La eliminación tardó más de 30 segundos";
+            } else if (error instanceof FetchNetworkError) {
+                errorMessage = "Error de conexión: " + error.message;
+            } else {
+                errorMessage += ": " + (error.message || "Error desconocido");
+            }
+            
+            addToast(errorMessage, 'error');
         }
     };
 
@@ -128,10 +150,11 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
                 <div className="flex gap-3">
                     <button
                         onClick={fetchPopulations}
-                        className="p-3 bg-white border border-slate-200 text-slate-400 rounded-lg hover:text-indigo-600 hover:border-indigo-400 transition-all shadow-sm"
+                        disabled={isRefreshing}
+                        className="p-3 bg-white border border-slate-200 text-slate-400 rounded-lg hover:text-indigo-600 hover:border-indigo-400 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Recargar Lista"
                     >
-                        <i className={`fas fa-sync-alt ${loading ? 'fa-spin' : ''}`}></i>
+                        <i className={`fas fa-sync-alt ${(loading || isRefreshing) ? 'fa-spin' : ''}`}></i>
                     </button>
                     <button
                         onClick={onAddNew}
@@ -153,9 +176,28 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
                     </div>
                 )}
                 {error && (
-                    <div className="p-6 bg-red-50 rounded-lg border border-red-100 flex items-center text-red-700">
-                        <i className="fas fa-exclamation-circle text-2xl mr-4"></i>
-                        <span>{error}</span>
+                    <div className="p-6 bg-red-50 rounded-lg border border-red-100">
+                        <div className="flex items-start">
+                            <i className="fas fa-exclamation-circle text-2xl text-red-500 mr-4 mt-1"></i>
+                            <div className="flex-1">
+                                <h3 className="text-red-800 font-bold text-sm mb-2">Error al cargar poblaciones</h3>
+                                <p className="text-red-700 text-sm mb-4">{error}</p>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={fetchPopulations}
+                                        className="bg-red-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-700 transition-all"
+                                    >
+                                        <i className="fas fa-redo mr-2"></i>Reintentar
+                                    </button>
+                                    <button
+                                        onClick={() => setError(null)}
+                                        className="bg-white text-red-600 border border-red-200 px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-50 transition-all"
+                                    >
+                                        Cerrar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 )}
                 {!loading && !error && populations.length === 0 && (

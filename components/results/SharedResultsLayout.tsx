@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AppState, SamplingMethod, UserRole } from '../../types';
 import { generateAuditReport } from '../../services/reportService';
+import { generateSimpleAuditReport } from '../../services/simpleReportService'; // 🔧 NUEVO IMPORT
 import { utils, writeFile } from 'xlsx';
 import Modal from '../ui/Modal';
 import { RichInfoCard } from '../ui/RichInfoCard';
@@ -36,9 +37,60 @@ const SharedResultsLayout: React.FC<Props> = ({
     const [analysisResults, setAnalysisResults] = useState<AnalysisResult[] | null>(null);
     const [showModal, setShowModal] = useState(false);
     const [showObservations, setShowObservations] = useState(false);
+    const [isGeneratingReport, setIsGeneratingReport] = useState(false); // 🔧 NUEVO ESTADO
 
     const exceptions = (appState.results?.sample || [])
         .filter(i => i.compliance_status === 'EXCEPCION');
+
+    // 🔧 FUNCIÓN MEJORADA PARA GENERAR REPORTE
+    const handleGenerateReport = async () => {
+        if (isGeneratingReport) {
+            console.warn("⚠️ Reporte ya en generación, ignorando click adicional");
+            return;
+        }
+
+        setIsGeneratingReport(true);
+        
+        try {
+            console.log("📄 Iniciando generación de reporte PDF...");
+            const startTime = Date.now();
+            
+            // 🚨 USAR GENERADOR SIMPLIFICADO EN DESARROLLO
+            const isDevelopment = window.location.hostname === 'localhost';
+            const useSimpleReport = isDevelopment || localStorage.getItem('USE_SIMPLE_REPORT') === 'true';
+            
+            if (useSimpleReport) {
+                console.log("📄 Usando generador simplificado...");
+                await generateSimpleAuditReport(appState);
+            } else {
+                console.log("📄 Usando generador completo...");
+                await generateAuditReport(appState);
+            }
+            
+            const duration = Date.now() - startTime;
+            console.log(`✅ Reporte generado exitosamente en ${duration}ms`);
+            
+        } catch (error) {
+            console.error("❌ Error generando reporte:", error);
+            
+            // 🔧 FALLBACK: Si falla el completo, intentar el simplificado
+            if (!localStorage.getItem('USE_SIMPLE_REPORT')) {
+                console.log("🔄 Intentando con generador simplificado como fallback...");
+                try {
+                    await generateSimpleAuditReport(appState);
+                    localStorage.setItem('USE_SIMPLE_REPORT', 'true');
+                    console.log("✅ Fallback exitoso - Activado modo simple permanente");
+                } catch (fallbackError) {
+                    console.error("❌ Fallback también falló:", fallbackError);
+                    alert(`Error al generar el reporte: ${fallbackError.message || 'Error desconocido'}`);
+                }
+            } else {
+                alert(`Error al generar el reporte: ${error.message || 'Error desconocido'}`);
+            }
+        } finally {
+            setIsGeneratingReport(false);
+        }
+    };
 
     useEffect(() => {
         if (exceptions.length > 0) {
@@ -145,8 +197,22 @@ const SharedResultsLayout: React.FC<Props> = ({
                                 Guardar Trabajo
                             </button>
                         )}
-                        <button onClick={() => generateAuditReport(appState)} className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all">
-                            Generar Reporte PDF
+                        <button 
+                            onClick={handleGenerateReport}
+                            disabled={isGeneratingReport}
+                            className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                            {isGeneratingReport ? (
+                                <>
+                                    <i className="fas fa-spinner fa-spin"></i>
+                                    Generando...
+                                </>
+                            ) : (
+                                <>
+                                    <i className="fas fa-file-pdf"></i>
+                                    Generar Reporte PDF
+                                </>
+                            )}
                         </button>
                     </div>
                 </div>

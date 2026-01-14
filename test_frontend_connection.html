@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Frontend Connection</title>
+</head>
+<body>
+    <h1>Test de Conexión Frontend</h1>
+    <div id="results"></div>
+    
+    <script>
+        async function testConnection() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<p>🔍 Probando conexión...</p>';
+            
+            try {
+                console.log('Iniciando test de conexión...');
+                
+                const response = await fetch('/api/sampling_proxy?action=get_populations', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                console.log('Response status:', response.status);
+                console.log('Response ok:', response.ok);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('Data received:', data);
+                
+                resultsDiv.innerHTML = `
+                    <h2>✅ Conexión Exitosa</h2>
+                    <p><strong>Status:</strong> ${response.status}</p>
+                    <p><strong>Poblaciones encontradas:</strong> ${data.populations?.length || 0}</p>
+                    <h3>Poblaciones:</h3>
+                    <ul>
+                        ${data.populations?.map(pop => 
+                            `<li>${pop.audit_name || 'Sin nombre'} (${pop.total_rows || 0} registros) - ${pop.status}</li>`
+                        ).join('') || '<li>No hay poblaciones</li>'}
+                    </ul>
+                `;
+                
+            } catch (error) {
+                console.error('Error en test:', error);
+                resultsDiv.innerHTML = `
+                    <h2>❌ Error en Conexión</h2>
+                    <p><strong>Error:</strong> ${error.message}</p>
+                    <p><strong>Tipo:</strong> ${error.name}</p>
+                    <p>Revisa la consola del navegador para más detalles.</p>
+                `;
+            }
+        }
+        
+        // Ejecutar test automáticamente
+        testConnection();
+    </script>
+</body>
+</html>

@@ -7,6 +7,7 @@ import RiskChart from '../reporting/RiskChart';
 import Modal from '../ui/Modal';
 import { RichInfoCard } from '../ui/RichInfoCard';
 import { ASSISTANT_CONTENT } from '../../constants';
+import { samplingProxyFetch, FetchTimeoutError, FetchNetworkError } from '../../services/fetchUtils';
 
 interface Props {
     appState: AppState;
@@ -42,12 +43,38 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
     else if (params.NC >= 95) rFactorDisplay = 3.0;
 
 
+    // Debounce para el guardado automático
+    const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
+    
+    const debouncedSave = (updatedResults: AuditResults) => {
+        // Cancelar el timeout anterior si existe
+        if (saveTimeout) {
+            clearTimeout(saveTimeout);
+        }
+        
+        // Crear nuevo timeout para guardar después de 2 segundos de inactividad
+        const newTimeout = setTimeout(() => {
+            saveToDb(updatedResults, true);
+        }, 2000);
+        
+        setSaveTimeout(newTimeout);
+    };
+
+    // Limpiar timeout al desmontar el componente
+    useEffect(() => {
+        return () => {
+            if (saveTimeout) {
+                clearTimeout(saveTimeout);
+            }
+        };
+    }, [saveTimeout]);
+
     // Auto-ocultar notificación de guardado
     useEffect(() => {
         if (saveFeedback.show) {
             const timer = setTimeout(() => {
                 setSaveFeedback(prev => ({ ...prev, show: false }));
-            }, 3000);
+            }, 4000); // Aumentado a 4 segundos para mejor UX
             return () => clearTimeout(timer);
         }
     }, [saveFeedback.show]);
@@ -55,6 +82,7 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
     const saveToDb = async (updatedResults: AuditResults, silent = true) => {
         if (!appState.selectedPopulation?.id) return;
         setIsSaving(true);
+        
         try {
             // Snapshot del método actual
             const currentMethodResults = {
@@ -70,29 +98,45 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
                 last_method: appState.samplingMethod
             };
 
-            const { error } = await supabase
-                .from('audit_results')
-                .upsert({
-                    population_id: appState.selectedPopulation.id,
-                    results_json: updatedStorage,
-                    sample_size: updatedResults.sampleSize,
-                    updated_at: new Date().toISOString()
-                }, { onConflict: 'population_id' });
+            // Usar el proxy para guardar con timeout
+            await samplingProxyFetch('save_work_in_progress', {
+                population_id: appState.selectedPopulation.id,
+                results_json: updatedStorage,
+                sample_size: updatedResults.sampleSize
+            }, { method: 'POST' });
 
-            if (error) {
-                console.error("Error saving results to DB:", error);
-                setSaveFeedback({ show: true, title: "Error de Sincronización", message: error.message, type: 'error' });
-            } else {
-                // Actualizamos el estado global con el nuevo storage para que App.tsx esté sincronizado
-                setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
+            // Actualizamos el estado global con el nuevo storage para que App.tsx esté sincronizado
+            setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
 
-                if (!silent) {
-                    setSaveFeedback({ show: true, title: "Sincronizado", message: "Papel de trabajo actualizado.", type: 'success' });
-                }
+            if (!silent) {
+                setSaveFeedback({ 
+                    show: true, 
+                    title: "Sincronizado", 
+                    message: "Papel de trabajo actualizado correctamente.", 
+                    type: 'success' 
+                });
             }
-        } catch (err: any) {
-            console.error("Exception saving to DB:", err);
-            if (!silent) setSaveFeedback({ show: true, title: "Error", message: "Falla de red.", type: 'error' });
+
+        } catch (error: any) {
+            console.error("Error saving to DB:", error);
+            
+            let errorMessage = "Error al guardar";
+            if (error instanceof FetchTimeoutError) {
+                errorMessage = "Timeout: El guardado tardó demasiado tiempo";
+            } else if (error instanceof FetchNetworkError) {
+                errorMessage = "Error de conexión: " + error.message;
+            } else {
+                errorMessage += ": " + (error.message || "Error desconocido");
+            }
+            
+            if (!silent) {
+                setSaveFeedback({ 
+                    show: true, 
+                    title: "Error de Guardado", 
+                    message: errorMessage, 
+                    type: 'error' 
+                });
+            }
         } finally {
             setIsSaving(false);
         }
@@ -359,11 +403,12 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
                                                     const updated = { ...currentResults, sample: ns };
                                                     setCurrentResults(updated);
                                                     setAppState(prev => ({ ...prev, results: updated }));
-                                                    saveToDb(updated);
+                                                    debouncedSave(updated);
                                                 }}
-                                                disabled={isApproved}
-                                                className={`px-8 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all shadow-sm ${isEx ? 'bg-rose-600 text-white shadow-rose-200' : 'bg-emerald-500 text-white shadow-emerald-100'}`}
+                                                disabled={isApproved || isSaving}
+                                                className={`px-8 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all shadow-sm disabled:opacity-50 ${isEx ? 'bg-rose-600 text-white shadow-rose-200' : 'bg-emerald-500 text-white shadow-emerald-100'}`}
                                             >
+                                                {isSaving ? <i className="fas fa-spinner fa-spin mr-1"></i> : null}
                                                 {isEx ? 'Excepción' : 'Conforme'}
                                             </button>
                                         </td>
@@ -378,10 +423,16 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
                                                     const updated = { ...currentResults, sample: ns };
                                                     setCurrentResults(updated);
                                                     setAppState(prev => ({ ...prev, results: updated }));
-                                                    // Don't save on every keystroke, wait for blur
+                                                    // Usar debounced save para evitar guardar en cada keystroke
+                                                    debouncedSave(updated);
                                                 }}
                                                 onBlur={() => {
-                                                    saveToDb(currentResults);
+                                                    // Guardar inmediatamente al perder el foco
+                                                    if (saveTimeout) {
+                                                        clearTimeout(saveTimeout);
+                                                        setSaveTimeout(null);
+                                                    }
+                                                    saveToDb(currentResults, true);
                                                 }}
                                                 className={`w-full text-[11px] font-bold rounded-xl px-4 py-2 border-2 transition-all ${isEx ? 'bg-white border-rose-200 text-rose-700' : 'bg-slate-50 border-transparent text-slate-300'}`}
                                                 placeholder={isEx ? "Documentar hallazgo..." : "Sin desviación"}

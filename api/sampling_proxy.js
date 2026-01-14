@@ -25,16 +25,42 @@ export default async function handler(req, res) {
         if (req.method === 'GET') {
             // Actions independent of population_id
             if (action === 'get_users') {
+                // FALLBACK: Si no hay SERVICE_ROLE_KEY, devolver error informativo
+                if (!supabaseServiceKey) {
+                    return res.status(503).json({ 
+                        error: 'Service unavailable: SUPABASE_SERVICE_ROLE_KEY not configured',
+                        message: 'Admin functions require service role key'
+                    });
+                }
+                
                 const { data: { users }, error } = await supabase.auth.admin.listUsers();
                 if (error) throw error;
                 return res.status(200).json({ users });
 
             } else if (action === 'get_populations') {
-                const { data, error } = await supabase
+                // FALLBACK: Si no hay SERVICE_ROLE_KEY, usar conexión anon con RLS
+                let supabaseClient;
+                
+                if (supabaseServiceKey) {
+                    // Usar service role si está disponible
+                    supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
+                } else {
+                    // Fallback: usar anon key (requiere RLS configurado)
+                    const anonKey = process.env.VITE_SUPABASE_ANON_KEY;
+                    if (!anonKey) throw new Error('No Supabase keys available');
+                    supabaseClient = createClient(supabaseUrl, anonKey);
+                    console.warn('Using anon key fallback for get_populations');
+                }
+                
+                const { data, error } = await supabaseClient
                     .from('audit_populations')
                     .select('*')
                     .order('created_at', { ascending: false });
-                if (error) throw error;
+                    
+                if (error) {
+                    console.error('get_populations error:', error);
+                    throw error;
+                }
                 return res.status(200).json({ populations: data });
             }
 

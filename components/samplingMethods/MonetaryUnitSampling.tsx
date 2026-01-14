@@ -55,7 +55,13 @@ const MonetaryUnitSampling: React.FC<Props> = ({ appState, setAppState }) => {
     const rf = getRFactor(params.RIA);
     const intervalValue = params.TE / rf;
     const absV = Math.abs(params.V); // Handle negative population values (e.g. Liabilities)
-    const theoreticalN = Math.ceil(absV / intervalValue);
+    const theoreticalNRaw = Math.ceil(absV / intervalValue);
+    
+    // CORRECCIÓN: Si la muestra teórica excede la población, ajustar automáticamente
+    const populationSize = appState.selectedPopulation?.total_rows || 1;
+    const theoreticalN = theoreticalNRaw > populationSize ? populationSize : theoreticalNRaw;
+    const isFullCensus = theoreticalNRaw > populationSize;
+    
     const isPilotInefficient = params.usePilotSample && theoreticalN < 30;
 
     const adjustToStatisticalMin = () => {
@@ -246,11 +252,24 @@ const MonetaryUnitSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         </div>
                         <div className="pt-4 border-t border-slate-800">
                             <div className="flex items-center justify-between text-slate-400 text-xs mb-2">
-                                <span>Muestra Teórica Requerida</span>
-                                <span className="font-mono text-emerald-400 font-bold">{theoreticalN}</span>
+                                <span>Unidades Monetarias Requeridas</span>
+                                <span className={`font-mono font-bold ${isFullCensus ? 'text-yellow-400' : 'text-emerald-400'}`}>
+                                    ${theoreticalNRaw.toLocaleString()}
+                                    {isFullCensus && <span className="ml-1 text-[10px]">(CENSO)</span>}
+                                </span>
+                            </div>
+                            {isFullCensus && (
+                                <div className="text-[9px] text-yellow-400 mb-2 font-medium">
+                                    Requiere ${theoreticalNRaw.toLocaleString()} unidades → Censo de {populationSize} registros
+                                </div>
+                            )}
+                            <div className="text-[9px] text-slate-500 mb-2">
+                                Registros físicos a auditar: <span className="text-emerald-400 font-bold">{theoreticalN}</span>
                             </div>
                             <div className="w-full bg-slate-800 h-1 rounded-full overflow-hidden">
-                                <div className="bg-emerald-500 h-full w-[65%] shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
+                                <div className={`h-full shadow-[0_0_10px_rgba(16,185,129,0.5)] ${
+                                    isFullCensus ? 'bg-yellow-500 w-full' : 'bg-emerald-500 w-[65%]'
+                                }`}></div>
                             </div>
                         </div>
                     </div>

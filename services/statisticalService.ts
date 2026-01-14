@@ -55,56 +55,153 @@ export const POISSON_TABLE: Record<number, Record<number, number>> = {
 
 // Helper local para generar ítems
 // Helper local para selección sistemática (Intervalo Constante)
+/**
+ * Selección sistemática de items para muestreo estadístico
+ * VERSIÓN CORREGIDA - Sin bucles infinitos garantizado
+ * 
+ * @param count - Número deseado de items a seleccionar
+ * @param seed - Semilla para aleatoriedad reproducible
+ * @param realRows - Array de datos de auditoría
+ * @param logicCallback - Función que procesa cada item seleccionado
+ * @returns Array de items seleccionados para la muestra
+ */
 const selectItems = (
     count: number,
     seed: number,
     realRows: AuditDataRow[],
     logicCallback: (i: number, row?: AuditDataRow) => Partial<AuditSampleItem>
 ): AuditSampleItem[] => {
-
-    const hasRealData = realRows && realRows.length > 0;
     const selectedItems: AuditSampleItem[] = [];
+    
+    // Validación temprana de parámetros
+    if (!realRows || realRows.length === 0) {
+        console.warn('⚠️ selectItems: No hay datos disponibles');
+        return selectedItems;
+    }
+    
+    if (count <= 0) {
+        console.warn('⚠️ selectItems: Count inválido', { count });
+        return selectedItems;
+    }
 
-    if (hasRealData) {
-        const N = realRows.length;
-        const step = count > 0 ? N / count : 1;
+    const N = realRows.length;
+    
+    // 🔒 LÍMITE ABSOLUTO: Nunca intentar seleccionar más items que la población
+    const effectiveSampleSize = Math.min(count, N);
+    
+    console.log(`📊 MUS Selection START:`, {
+        población: N,
+        solicitado: count,
+        efectivo: effectiveSampleSize
+    });
 
-        // Determinar un punto de inicio aleatorio basado en la semilla (reproducible)
-        // El inicio debe estar entre 0 y el primer intervalo (step)
-        // Usamos una lógica determinista simple con la semilla
-        const startOffset = (seed * LCG_MULTIPLIER + LCG_INCREMENT) % LCG_MODULUS;
-        const normalizedStart = (startOffset / LCG_MODULUS) * Math.min(step, N - 1);
+    // 🎯 ESTRATEGIA 1: Si sample >= población, tomar todos los items
+    if (effectiveSampleSize >= N * 0.95) { // 95% o más
+        console.log('📋 Selección completa (muestra ≥ población)');
+        for (let i = 0; i < N; i++) {
+            const row = realRows[i];
+            selectedItems.push({
+                id: String(row.unique_id_col || `ROW-${i}`),
+                value: row.monetary_value_col || 0,
+                raw_row: row.raw_json,
+                risk_score: 0,
+                compliance_status: 'OK',
+                ...logicCallback(i, row)
+            });
+        }
+        console.log(`✅ Selección completa: ${selectedItems.length} items`);
+        return selectedItems;
+    }
 
-        for (let i = 0; i < count; i++) {
-            // formula: start + i * step
-            const index = Math.min(Math.floor(normalizedStart + i * step), N - 1);
+    // 🎯 ESTRATEGIA 2: Muestreo sistemático con índices pre-calculados
+    const step = N / effectiveSampleSize;
+    
+    if (!isFinite(step) || step <= 0) {
+        console.error('🚨 Step inválido, usando fallback', { step, N, effectiveSampleSize });
+        // Fallback: selección equidistante simple
+        for (let i = 0; i < effectiveSampleSize; i++) {
+            const index = Math.floor((i * N) / effectiveSampleSize);
             const row = realRows[index];
-
-            const item: AuditSampleItem = {
+            selectedItems.push({
                 id: String(row.unique_id_col || `ROW-${index}`),
                 value: row.monetary_value_col || 0,
                 raw_row: row.raw_json,
                 risk_score: 0,
                 compliance_status: 'OK',
                 ...logicCallback(i, row)
-            };
-            selectedItems.push(item);
+            });
         }
+        console.log(`✅ Fallback: ${selectedItems.length} items`);
+        return selectedItems;
+    }
 
-    } else {
-        // Fallback for simulation/no-data
-        for (let i = 0; i < count; i++) {
-            const currentIdx = i + 1;
-            const item: AuditSampleItem = {
-                id: `TRANS-${seed + currentIdx}`,
-                value: Math.floor(Math.random() * 15000) + 100,
-                risk_score: 0,
-                compliance_status: 'OK',
-                ...logicCallback(i)
-            };
-            selectedItems.push(item);
+    // Calcular punto de inicio aleatorio basado en seed
+    const startOffset = (seed * 1103515245 + 12345) % 2147483647;
+    const normalizedStart = (startOffset / 2147483647) * Math.min(step, N - 1);
+
+    console.log(`🔢 Parámetros calculados:`, {
+        step: step.toFixed(4),
+        startOffset: normalizedStart.toFixed(2)
+    });
+
+    // 🔒 PRE-CALCULAR TODOS LOS ÍNDICES (evita bucles infinitos)
+    const selectedIndices = new Set<number>();
+    
+    for (let i = 0; i < effectiveSampleSize; i++) {
+        const rawIndex = normalizedStart + (i * step);
+        const index = Math.floor(rawIndex) % N; // Wrap around si es necesario
+        selectedIndices.add(index);
+        
+        // 🛡️ PROTECCIÓN: Si ya tenemos suficientes índices únicos, salir
+        if (selectedIndices.size >= effectiveSampleSize) {
+            break;
         }
     }
+
+    console.log(`🎲 Índices únicos generados: ${selectedIndices.size}`);
+
+    // 🔒 GARANTÍA: Si no hay suficientes índices únicos, agregar más
+    if (selectedIndices.size < effectiveSampleSize) {
+        console.warn(`⚠️ Completando índices faltantes: ${effectiveSampleSize - selectedIndices.size}`);
+        let attempts = 0;
+        const maxAttempts = N * 2;
+        
+        while (selectedIndices.size < effectiveSampleSize && attempts < maxAttempts) {
+            const randomIndex = Math.floor((Math.random() * N));
+            selectedIndices.add(randomIndex);
+            attempts++;
+        }
+    }
+
+    // 🎯 CONSTRUIR MUESTRA FINAL desde índices pre-calculados
+    const sortedIndices = Array.from(selectedIndices).sort((a, b) => a - b);
+    
+    for (let i = 0; i < sortedIndices.length; i++) {
+        const index = sortedIndices[i];
+        
+        // Validación de seguridad
+        if (index < 0 || index >= N || !realRows[index]) {
+            console.warn(`⚠️ Índice inválido saltado: ${index}`);
+            continue;
+        }
+        
+        const row = realRows[index];
+        selectedItems.push({
+            id: String(row.unique_id_col || `ROW-${index}`),
+            value: row.monetary_value_col || 0,
+            raw_row: row.raw_json,
+            risk_score: 0,
+            compliance_status: 'OK',
+            ...logicCallback(i, row)
+        });
+    }
+
+    console.log(`✅ selectItems COMPLETO:`, {
+        solicitados: count,
+        seleccionados: selectedItems.length,
+        población: N,
+        cobertura: `${((selectedItems.length / N) * 100).toFixed(1)}%`
+    });
 
     return selectedItems;
 };
@@ -376,6 +473,20 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
                 methodologyNotes.push("Advertencia MUS: El error esperado supera la capacidad del modelo. Se aplica tamaño máximo prudencial.");
             } else {
                 let calculatedSize = Math.ceil(numerator / denominator);
+                
+                console.log(`🔢 MUS Sample Size Calculated: ${calculatedSize}`);
+
+                // PROTECCIÓN CRÍTICA CONTRA TAMAÑOS EXCESIVOS QUE CAUSAN BUCLES INFINITOS
+                const populationSize = processedRows.length;
+                const maxReasonableSize = Math.min(populationSize * 0.8, 2000); // Máximo 80% de población o 2000
+                
+                if (calculatedSize > maxReasonableSize) {
+                    console.warn(`🚨 MUS: Tamaño excesivo detectado. Calculado: ${calculatedSize}, Límite: ${maxReasonableSize}`);
+                    const originalSize = calculatedSize;
+                    calculatedSize = maxReasonableSize;
+                    methodologyNotes.push(`Advertencia MUS: Tamaño calculado excesivo (${originalSize}). Limitado a ${calculatedSize} por viabilidad práctica.`);
+                    methodologyNotes.push(`Recomendación: Considere aumentar la Tolerancia al Error (TE) de $${mus.TE.toLocaleString()} a un valor mayor para reducir el tamaño de muestra.`);
+                }
 
                 // Safety Cap: Never exceed population size (Census)
                 if (calculatedSize > processedRows.length) {

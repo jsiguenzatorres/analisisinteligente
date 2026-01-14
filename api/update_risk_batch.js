@@ -21,6 +21,7 @@ export default async function handler(req, res) {
 
     try {
         if (!supabaseUrl || !supabaseServiceKey) {
+            console.error('Missing Supabase configuration:', { supabaseUrl: !!supabaseUrl, supabaseServiceKey: !!supabaseServiceKey });
             throw new Error('Supabase configuration missing');
         }
 
@@ -28,33 +29,92 @@ export default async function handler(req, res) {
         const { updates } = req.body;
 
         if (!updates || !Array.isArray(updates)) {
-            return res.status(400).json({ error: 'Invalid updates payload' });
+            console.error('Invalid payload:', { updates: typeof updates, isArray: Array.isArray(updates) });
+            return res.status(400).json({ error: 'Invalid updates payload - must be array' });
         }
 
-        // Batch upsert in chunks of 100 to avoid request size limits
-        const CHUNK_SIZE = 100;
+        if (updates.length === 0) {
+            return res.status(200).json({ success: true, count: 0, message: 'No updates to process' });
+        }
+
+        console.log(`Processing ${updates.length} risk updates...`);
+
+        // Validar estructura de cada update
+        const invalidUpdates = updates.filter(update => !update.id || typeof update.id !== 'string');
+        if (invalidUpdates.length > 0) {
+            console.error('Invalid update structure:', invalidUpdates.slice(0, 3));
+            return res.status(400).json({ 
+                error: 'Invalid update structure - missing id field',
+                sample: invalidUpdates.slice(0, 3)
+            });
+        }
+
+        // Batch upsert in smaller chunks to avoid timeout and memory issues
+        const CHUNK_SIZE = 50; // Reducido de 100 a 50 para mejor estabilidad
         const errors = [];
+        let processedCount = 0;
 
         for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
             const chunk = updates.slice(i, i + CHUNK_SIZE);
-            const { error } = await supabase
-                .from('audit_data_rows')
-                .upsert(chunk, { onConflict: 'id' });
+            
+            try {
+                console.log(`Processing chunk ${Math.floor(i/CHUNK_SIZE) + 1}/${Math.ceil(updates.length/CHUNK_SIZE)} (${chunk.length} items)`);
+                
+                const { error, count } = await supabase
+                    .from('audit_data_rows')
+                    .upsert(chunk, { 
+                        onConflict: 'id',
+                        count: 'exact'
+                    });
 
-            if (error) {
-                console.error('Batch upsert error:', error);
-                errors.push(error);
+                if (error) {
+                    console.error('Batch upsert error:', error);
+                    errors.push({
+                        chunk: Math.floor(i/CHUNK_SIZE) + 1,
+                        error: error.message,
+                        details: error.details
+                    });
+                } else {
+                    processedCount += count || chunk.length;
+                    console.log(`Chunk ${Math.floor(i/CHUNK_SIZE) + 1} processed successfully: ${count || chunk.length} rows`);
+                }
+            } catch (chunkError) {
+                console.error('Chunk processing error:', chunkError);
+                errors.push({
+                    chunk: Math.floor(i/CHUNK_SIZE) + 1,
+                    error: chunkError.message
+                });
+            }
+
+            // Pausa pequeña entre chunks para evitar rate limiting
+            if (i + CHUNK_SIZE < updates.length) {
+                await new Promise(resolve => setTimeout(resolve, 100));
             }
         }
 
         if (errors.length > 0) {
-            return res.status(500).json({ error: 'Partial processing error', details: errors });
+            console.error('Processing completed with errors:', errors);
+            return res.status(207).json({ 
+                success: false, 
+                error: 'Partial processing error', 
+                details: errors,
+                processedCount,
+                totalCount: updates.length
+            });
         }
 
-        return res.status(200).json({ success: true, count: updates.length });
+        console.log(`Successfully processed ${processedCount} risk updates`);
+        return res.status(200).json({ 
+            success: true, 
+            count: processedCount,
+            totalChunks: Math.ceil(updates.length/CHUNK_SIZE)
+        });
 
     } catch (error) {
-        console.error('[Update Risk Error]', error);
-        return res.status(500).json({ error: error.message });
+        console.error('[Update Risk Batch Error]', error);
+        return res.status(500).json({ 
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
     }
 }

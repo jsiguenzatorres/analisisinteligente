@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../services/supabaseClient';
+import { samplingProxyFetch, FetchTimeoutError, FetchNetworkError } from '../../services/fetchUtils';
 
 interface UserProfile {
     id: string;
@@ -15,26 +16,22 @@ interface UserProfile {
 const AdminUserManagementView: React.FC = () => {
     const [users, setUsers] = useState<UserProfile[]>([]);
     const [loading, setLoading] = useState(true);
-    const [lastError, setLastError] = useState<any>(null); // Nuevo estado para errores
+    const [error, setError] = useState<string | null>(null);
     const [actionLoading, setActionLoading] = useState<string | null>(null);
 
     useEffect(() => {
         let isMounted = true;
 
         const fetchUsers = async () => {
+            if (!isMounted) return;
+            
             try {
                 setLoading(true);
-                setLastError(null);
-                console.log("Admin: Iniciando carga de usuarios vía Proxy...");
+                setError(null);
+                console.log("Admin: Iniciando carga de usuarios vía proxy...");
 
-                // Fetch via Proxy to bypass firewall
-                const res = await fetch('/api/sampling_proxy?action=get_users');
-                if (!res.ok) {
-                    const errText = await res.text();
-                    throw new Error(`Error fetching users (${res.status}): ${errText}`);
-                }
-
-                const { users: data } = await res.json();
+                // Usar el proxy con timeout y manejo de errores mejorado
+                const { users: data } = await samplingProxyFetch('get_users');
                 console.log("AdminView: Datos recibidos:", data);
 
                 if (isMounted) {
@@ -42,8 +39,21 @@ const AdminUserManagementView: React.FC = () => {
                 }
             } catch (err: any) {
                 console.error("Error fetching users:", err);
-                if (isMounted) setLastError(err);
-                if (isMounted) setUsers([]);
+                
+                if (isMounted) {
+                    let errorMessage = "Error al cargar usuarios";
+                    
+                    if (err instanceof FetchTimeoutError) {
+                        errorMessage = "Timeout: La carga tardó demasiado tiempo. Verifique su conexión.";
+                    } else if (err instanceof FetchNetworkError) {
+                        errorMessage = "Error de conexión: " + err.message;
+                    } else {
+                        errorMessage += ": " + (err.message || "Error desconocido");
+                    }
+                    
+                    setError(errorMessage);
+                    setUsers([]);
+                }
             } finally {
                 if (isMounted) setLoading(false);
             }
@@ -57,22 +67,28 @@ const AdminUserManagementView: React.FC = () => {
         try {
             setActionLoading(userId);
 
-            // Proxy Call
-            const res = await fetch('/api/sampling_proxy?action=toggle_user_status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: userId, status: !currentStatus })
-            });
-
-            if (!res.ok) {
-                const errText = await res.text();
-                throw new Error(`Proxy error (${res.status}): ${errText}`);
-            }
+            // Usar el proxy con timeout para actualizar estado
+            await samplingProxyFetch('toggle_user_status', {
+                user_id: userId,
+                status: !currentStatus
+            }, { method: 'POST' });
 
             setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_active: !currentStatus } : u));
-        } catch (err) {
-            console.error("Error updating user status:", err);
-            alert("No se pudo actualizar el estado del usuario.");
+            
+        } catch (error: any) {
+            console.error("Error updating user status:", error);
+            
+            let errorMessage = "No se pudo actualizar el estado del usuario";
+            
+            if (error instanceof FetchTimeoutError) {
+                errorMessage = "Timeout: La actualización tardó demasiado tiempo";
+            } else if (error instanceof FetchNetworkError) {
+                errorMessage = "Error de conexión: " + error.message;
+            } else {
+                errorMessage += ": " + (error.message || "Error desconocido");
+            }
+            
+            alert(errorMessage);
         } finally {
             setActionLoading(null);
         }
@@ -88,13 +104,41 @@ const AdminUserManagementView: React.FC = () => {
                     </div>
                 </div>
 
-                {/* VISUAL DIAGNOSTIC PANEL */}
-                <div className="mb-4 p-2 bg-slate-100 border border-slate-300 rounded text-xs font-mono overflow-auto max-h-40">
-                    <p><strong>Estado:</strong> {loading ? 'Cargando...' : 'Listo'}</p>
-                    <p><strong>Usuarios Encontrados:</strong> {users.length}</p>
-                    <p><strong>Ultimo Error:</strong> {lastError ? (lastError.message || JSON.stringify(lastError)) : 'Ninguno'}</p>
-                    <p><strong>Muestra Data (Raw):</strong> {JSON.stringify(users.slice(0, 2), null, 2)}</p>
-                </div>
+                {/* PANEL DE DIAGNÓSTICO MEJORADO */}
+                {(loading || error || users.length === 0) && (
+                    <div className="mb-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                        <div className="flex items-center gap-3 mb-3">
+                            <div className={`w-3 h-3 rounded-full ${loading ? 'bg-blue-500 animate-pulse' : error ? 'bg-red-500' : 'bg-green-500'}`}></div>
+                            <h3 className="text-sm font-bold text-slate-700">Estado del Sistema</h3>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                            <div>
+                                <span className="font-bold text-slate-500">Estado:</span>
+                                <span className={`ml-2 ${loading ? 'text-blue-600' : error ? 'text-red-600' : 'text-green-600'}`}>
+                                    {loading ? 'Cargando...' : error ? 'Error' : 'Listo'}
+                                </span>
+                            </div>
+                            <div>
+                                <span className="font-bold text-slate-500">Usuarios:</span>
+                                <span className="ml-2 text-slate-700">{users.length}</span>
+                            </div>
+                            <div>
+                                <span className="font-bold text-slate-500">Último Error:</span>
+                                <span className="ml-2 text-slate-600">{error || 'Ninguno'}</span>
+                            </div>
+                        </div>
+                        {error && (
+                            <div className="mt-3 pt-3 border-t border-slate-200">
+                                <button
+                                    onClick={() => window.location.reload()}
+                                    className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-blue-700 transition-all"
+                                >
+                                    <i className="fas fa-redo mr-1"></i>Recargar Página
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 <div className="overflow-x-auto">
                     <table className="w-full text-left">
@@ -158,13 +202,35 @@ const AdminUserManagementView: React.FC = () => {
 
                 {loading && (
                     <div className="p-20 text-center">
-                        <p className="text-slate-400 text-sm font-bold animate-pulse">Cargando...</p>
+                        <div className="flex flex-col items-center">
+                            <i className="fas fa-circle-notch fa-spin text-4xl text-blue-500 mb-4"></i>
+                            <p className="text-slate-500 font-medium">Cargando usuarios...</p>
+                            <p className="text-slate-400 text-sm mt-1">Esto puede tomar unos segundos</p>
+                        </div>
                     </div>
                 )}
 
-                {!loading && users.length === 0 && (
+                {!loading && error && (
+                    <div className="p-20 text-center">
+                        <div className="bg-red-50 border border-red-200 rounded-xl p-6 max-w-md mx-auto">
+                            <i className="fas fa-exclamation-triangle text-red-500 text-3xl mb-3"></i>
+                            <h3 className="text-red-800 font-bold text-lg mb-2">Error de Conexión</h3>
+                            <p className="text-red-700 text-sm mb-4">{error}</p>
+                            <button
+                                onClick={() => window.location.reload()}
+                                className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-700 transition-all"
+                            >
+                                <i className="fas fa-redo mr-2"></i>Reintentar
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {!loading && !error && users.length === 0 && (
                     <div className="p-20 text-center text-slate-400">
-                        No hay usuarios registrados.
+                        <i className="fas fa-users text-4xl mb-4 opacity-50"></i>
+                        <p className="text-lg font-medium">No hay usuarios registrados</p>
+                        <p className="text-sm mt-1">Los nuevos registros aparecerán aquí automáticamente</p>
                     </div>
                 )}
             </div>

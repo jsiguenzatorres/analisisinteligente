@@ -7,7 +7,7 @@ export enum SamplingMethod {
     NonStatistical = 'non_statistical',
 }
 
-export type InsightType = 'RiskScoring' | 'Benford' | 'Outliers' | 'Duplicates' | 'RoundNumbers' | 'Default';
+export type InsightType = 'RiskScoring' | 'Benford' | 'Outliers' | 'Duplicates' | 'RoundNumbers' | 'Entropy' | 'Splitting' | 'Sequential' | 'IsolationForest' | 'ActorProfiling' | 'EnhancedBenford' | 'Default';
 
 export interface NonStatisticalParams {
     criteria: string;
@@ -170,6 +170,52 @@ export interface AdvancedAnalysis {
     roundNumbersCount: number;
     forensicDiscovery?: string[]; // IDs of active tests
     eda?: EdaMetrics;
+    entropy?: {
+        categoryEntropy: number;
+        subcategoryEntropy: number;
+        conditionalEntropy: number;
+        mutualInformation: number;
+        informationGain: number;
+        anomalousCount: number;
+        highRiskCombinations: number;
+    };
+    splitting?: {
+        suspiciousVendors: number;
+        totalSuspiciousTransactions: number;
+        averageRiskScore: number;
+        highRiskGroups: number;
+    };
+    sequential?: {
+        totalGaps: number;
+        totalMissingDocuments: number;
+        largestGap: number;
+        highRiskGaps: number;
+        suspiciousPatterns: number;
+    };
+    isolationForest?: {
+        totalAnomalies: number;
+        averagePathLength: number;
+        anomalyThreshold: number;
+        highRiskAnomalies: number;
+    };
+    actorProfiling?: {
+        totalSuspiciousActors: number;
+        averageRiskScore: number;
+        highRiskActors: number;
+        behaviorPatterns: number;
+    };
+    enhancedBenford?: {
+        firstDigitDeviation: number;
+        secondDigitDeviation: number;
+        overallDeviation: number;
+        suspiciousPatterns: number;
+        highRiskPatterns: number;
+        isFirstDigitSignificant: boolean;
+        isSecondDigitSignificant: boolean;
+        conformityLevel: 'CLOSE' | 'ACCEPTABLE' | 'MARGINAL' | 'NONCONFORMITY';
+        conformityDescription: string;
+        conformityRiskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+    };
 }
 
 export interface RiskProfile {

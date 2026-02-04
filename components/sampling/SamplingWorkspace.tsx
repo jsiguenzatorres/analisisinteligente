@@ -296,10 +296,15 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
 
                     console.log("🔄 Guardando muestra con estrategia híbrida...");
                     
-                    // Usar nuevo servicio de almacenamiento (guardado directo + fallback Edge Function)
-                    const savedSample = await saveSample(historicalData);
+                    // ✅ FIX CRÍTICO: Usar samplingProxyFetch en lugar de saveSample
+                    const savedSample = await samplingProxyFetch('save_sample', {
+                        population_id: historicalData.population_id,
+                        method: historicalData.method,
+                        sample_data: historicalData,
+                        is_final: historicalData.is_final
+                    });
                     
-                    console.log(`✅ Guardado completado en ${savedSample.duration_ms}ms (método: ${savedSample.method})`);
+                    console.log(`✅ Guardado completado exitosamente:`, savedSample);
 
                     setAppState(prev => {
                         const currentMethodResults = {
@@ -312,7 +317,7 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                             results,
                             isLocked: true,
                             isCurrentVersion: true,
-                            historyId: savedSample.id,
+                            historyId: savedSample.id || savedSample.sample_id,
                             full_results_storage: {
                                 ...(prev.full_results_storage || {}),
                                 [prev.samplingMethod]: currentMethodResults,

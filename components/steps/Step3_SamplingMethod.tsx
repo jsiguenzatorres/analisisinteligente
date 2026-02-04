@@ -58,30 +58,44 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
 
             if (populationId) {
                 // ---------------------------------------------------------
-                // UNIVERSAL SERVER-SIDE SAMPLING (Prevent Browser Freeze)
+                // UNIVERSAL SERVER-SIDE SAMPLING SWITCH
                 // ---------------------------------------------------------
+                // Explicitly check for Server Side Methods
                 const useServerSide = appState.samplingMethod === SamplingMethod.NonStatistical ||
                     appState.samplingMethod === SamplingMethod.Attribute;
+
+                let serverRows: any[] | null = null;
+
 
                 console.log("🔍 DEBUG: samplingMethod =", appState.samplingMethod);
                 console.log("🔍 DEBUG: SamplingMethod.NonStatistical =", SamplingMethod.NonStatistical);
                 console.log("🔍 DEBUG: useServerSide =", useServerSide);
 
-                if (useServerSide) {
-                    console.log("🚀 Step 3: Executing SERVER-SIDE Sampling...");
+                if (appState.samplingMethod === SamplingMethod.NonStatistical) {
+                    // ------------------------------------
+                    // 1. NON-STATISTICAL (Server-Side GET)
+                    // ------------------------------------
+                    const type = appState.samplingParams.nonStatistical.selectedInsight || 'RiskScoring';
+                    const size = appState.samplingParams.nonStatistical.sampleSize || 30;
+                    const threshold = appState.selectedPopulation?.advanced_analysis?.outliersThreshold || 0;
 
-                    let params: any = { sampleSize: 30 };
+                    console.log(`🚀 Step 3 (NonStat): GET /api/sampling_proxy?action=get_non_statistical_sample&type=${type}`);
 
-                    if (appState.samplingMethod === SamplingMethod.NonStatistical) {
-                        params = {
-                            sampleSize: appState.samplingParams.nonStatistical.sampleSize || 30,
-                            insight: appState.samplingParams.nonStatistical.selectedInsight || 'Random'
-                        };
-                    } else if (appState.samplingMethod === SamplingMethod.Attribute) {
-                        params = {
-                            sampleSize: appState.samplingParams.attribute.sampleSize || 30
-                        };
-                    }
+                    const res = await fetch(`/api/sampling_proxy?action=get_non_statistical_sample&population_id=${populationId}&type=${type}&size=${size}&threshold=${threshold}`);
+
+                    if (!res.ok) throw new Error("Error en muestreo No Estadístico (Server-Side)");
+                    const { rows } = await res.json();
+                    serverRows = rows;
+
+                } else if (appState.samplingMethod === SamplingMethod.Attribute) {
+                    // ------------------------------------
+                    // 2. ATTRIBUTE (Server-Side POST)
+                    // ------------------------------------
+                    const attrParams = {
+                        sampleSize: appState.samplingParams.attribute.sampleSize || 30
+                    };
+
+                    console.log(`🚀 Step 3 (Attribute): POST /api/sampling_proxy?action=calculate_sample`);
 
                     const res = await fetch('/api/sampling_proxy?action=calculate_sample', {
                         method: 'POST',
@@ -89,27 +103,30 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
                         body: JSON.stringify({
                             population_id: populationId,
                             method: appState.samplingMethod,
-                            params
+                            params: attrParams
                         })
                     });
 
-                    if (!res.ok) throw new Error("Error en muestreo (Server-Side)");
+                    if (!res.ok) throw new Error("Error en muestreo Atributos (Server-Side)");
                     const { rows } = await res.json();
+                    serverRows = rows;
+                }
 
-                    if (!rows || rows.length === 0) {
+                if (serverRows) {
+                    if (!serverRows || serverRows.length === 0) {
                         alert("No se encontraron registros para la muestra.");
                         setLoading(false);
                         return;
                     }
 
-                    // Map Response
-                    const serverSample = rows.map((r: any) => ({
+                    // Map Response (Shared Mapping for Server Results)
+                    const serverSample = serverRows.map((r: any) => ({
                         id: String(r.unique_id_col),
                         value: r.monetary_value_col || 0,
                         risk_score: r.risk_score,
                         risk_factors: r.risk_factors || [],
                         risk_flag: r.risk_score > 0 ? 'RIESGO DETECTADO' : 'Muestreo Aleatorio',
-                        risk_justification: `Selección Servidor: ${appState.samplingMethod} (${params.insight || 'General'})`,
+                        risk_justification: `Selección Servidor: ${appState.samplingMethod}`,
                         is_manual_selection: true,
                         raw_row: r.raw_json
                     }));
@@ -129,6 +146,10 @@ const Step3SamplingMethod: React.FC<Props> = ({ appState, setAppState, setCurren
                     setLoading(false);
                     return; // EXIT EARLY
                 }
+
+                // ---------------------------------------------------------
+                // STRATEGY B: CLIENT-SIDE SAMPLING (MUS, Stratified, CAV)
+                // ---------------------------------------------------------
 
 
                 // ---------------------------------------------------------

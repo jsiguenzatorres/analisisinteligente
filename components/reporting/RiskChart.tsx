@@ -44,9 +44,9 @@ const RiskChart: React.FC<RiskChartProps> = ({ upperErrorLimit, tolerableError, 
     }
 
     return (
-        <div className="relative w-full h-full flex flex-col">
+        <div className="relative w-full h-full flex flex-col" style={{ minHeight: '200px' }}>
             <div className="flex-grow">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" debounce={300} minWidth={200} minHeight={150}>
                     <BarChart
                         data={data}
                         layout="vertical"

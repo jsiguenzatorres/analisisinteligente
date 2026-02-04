@@ -213,7 +213,7 @@ const PopulationManager: React.FC<Props> = ({ onPopulationSelected, onAddNew }) 
                     </div>
                 )}
                 {!loading && !error && populations.length > 0 && (
-                    <div className="overflow-x-auto rounded-lg border border-slate-200">
+                    <div className="overflow-x-auto overflow-y-visible rounded-lg border border-slate-200 max-w-full">
                         <table className="min-w-full divide-y divide-slate-200">
                             <thead className="bg-slate-50">
                                 <tr>

@@ -1,5 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
+// v2.5.1 - Debug logs for samplingMethod condition
+// Last deploy: 2026-01-12 12:30 UTC - FORCE REBUILD
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -62,6 +64,21 @@ export default async function handler(req, res) {
                     throw error;
                 }
                 return res.status(200).json({ populations: data });
+
+            } else if (action === 'get_all_results') {
+                // Modified to be optional population_id
+                const { population_id } = req.query;
+                let query = supabase
+                    .from('audit_results')
+                    .select('results_json, population_id');
+
+                if (population_id) {
+                    query = query.eq('population_id', population_id);
+                }
+
+                const { data, error } = await query;
+                if (error) throw error;
+                return res.status(200).json({ results: data });
             }
 
             // Actions requiring population_id
@@ -106,6 +123,54 @@ export default async function handler(req, res) {
                 if (error) throw error;
                 return res.status(200).json({ rows: data });
 
+            } else if (action === 'get_non_statistical_sample') {
+                // SERVER-SIDE SAMPLING (Specific Non-Statistical Criteria)
+                const { type, size, threshold } = req.query;
+                const limit = parseInt(size) || 30;
+
+                let query = supabase.from('audit_data_rows')
+                    .select('unique_id_col, monetary_value_col, risk_score, risk_factors, raw_json')
+                    .eq('population_id', population_id);
+
+                switch (type) {
+                    case 'RiskScoring':
+                        query = query.order('risk_score', { ascending: false });
+                        break;
+                    case 'Benford':
+                        // Filter rows where risk_factors array contains Benford alerts
+                        // Note: Requires risk_factors to be populated correctly during upload/profiling
+                        query = query.not('risk_factors', 'is', null).or('risk_factors.cs.{"Benford"},risk_factors.cs.{"Benford (1)"},risk_factors.cs.{"Benford (2)"}');
+                        // Fallback order
+                        query = query.order('risk_score', { ascending: false });
+                        break;
+                    case 'Outliers':
+                        // Use threshold if provided (passed from client analysis)
+                        if (threshold) {
+                            query = query.gt('monetary_value_col', threshold);
+                        } else {
+                            // Fallback: Just high risk/high value
+                            query = query.order('monetary_value_col', { ascending: false });
+                        }
+                        break;
+                    case 'Duplicates':
+                        query = query.contains('risk_factors', ['Duplicado']);
+                        break;
+                    case 'RoundNumbers':
+                        // Search for generic Round Number tag
+                        query = query.contains('risk_factors', ['Redondo']);
+                        break;
+                    default:
+                        query = query.order('risk_score', { ascending: false });
+                }
+
+                const { data, error } = await query.limit(limit);
+
+                if (error) throw error;
+
+                // If specific filter returns few/no results, fallback to Risk Score? 
+                // For now return what we found. Client handles empty check.
+                return res.status(200).json({ rows: data });
+
             } else if (action === 'get_history') {
                 const { data, error } = await supabase
                     .from('audit_historical_samples')
@@ -114,14 +179,6 @@ export default async function handler(req, res) {
                     .order('created_at', { ascending: false });
                 if (error) throw error;
                 return res.status(200).json({ history: data });
-
-            } else if (action === 'get_all_results') {
-                const { data, error } = await supabase
-                    .from('audit_results')
-                    .select('results_json, population_id')
-                    .eq('population_id', population_id);
-                if (error) throw error;
-                return res.status(200).json({ results: data });
 
             } else if (action === 'get_observations') {
                 const { data, error } = await supabase
@@ -172,17 +229,40 @@ export default async function handler(req, res) {
                 return res.status(200).json(data);
 
             } else if (action === 'save_work_in_progress') {
+                console.log('📝 save_work_in_progress called');
                 const { population_id, results_json, sample_size } = req.body;
-                if (!population_id || !results_json) return res.status(400).json({ error: 'Missing required fields' });
+                console.log('Population ID:', population_id);
+                console.log('Results JSON type:', typeof results_json);
+                console.log('Sample size:', sample_size);
 
-                const { data, error } = await supabase
-                    .from('audit_results')
-                    .upsert({
-                        population_id, results_json, sample_size, updated_at: new Date().toISOString()
-                    }, { onConflict: 'population_id' })
-                    .select();
-                if (error) throw error;
-                return res.status(200).json(data);
+                if (!population_id || !results_json) {
+                    console.error('Missing fields - population_id:', !!population_id, 'results_json:', !!results_json);
+                    return res.status(400).json({ error: 'Missing required fields' });
+                }
+
+                try {
+                    const { data, error } = await supabase
+                        .from('audit_results')
+                        .upsert({
+                            population_id,
+                            results_json,
+                            sample_size,
+                            updated_at: new Date().toISOString()
+                        }, { onConflict: 'population_id' })
+                        .select();
+
+                    if (error) {
+                        console.error('Supabase upsert error:', error);
+                        throw error;
+                    }
+
+                    console.log('✅ Save successful');
+                    return res.status(200).json(data);
+                } catch (upsertError) {
+                    console.error('Upsert exception:', upsertError);
+                    throw upsertError;
+                }
+
 
             } else if (action === 'delete_population') {
                 const { population_id } = req.body;
@@ -271,11 +351,32 @@ export default async function handler(req, res) {
                     }
                 } else if (method === 'Attribute') {
                     // Random Selection
-                    // heuristic: order by unique_id_col
+                    // heuristic: order by unique_id_col (Detailed Randomness not needed for Attribute usually, just Selection)
+                    query = query.order('unique_id_col', { ascending: true });
                 }
 
                 // EXECUTE QUERY
                 const { data, error } = await query.limit(limit);
+
+                if (error) throw error;
+                return res.status(200).json({ rows: data });
+
+            } else if (action === 'expand_sample') {
+                // SERVER-SIDE SAMPLE EXPANSION (Prevent Browser Freeze)
+                const { population_id, existing_ids, amount } = JSON.parse(body);
+
+                if (!population_id || !existing_ids || !amount) {
+                    return res.status(400).json({ error: 'Missing required fields' });
+                }
+
+                // Query for additional rows NOT in existing sample, ordered by risk_score descending
+                const { data, error } = await supabase
+                    .from('audit_data_rows')
+                    .select('unique_id_col, monetary_value_col, risk_score, risk_factors, raw_json')
+                    .eq('population_id', population_id)
+                    .not('unique_id_col', 'in', `(${existing_ids.map(id => `"${id}"`).join(',')})`)
+                    .order('risk_score', { ascending: false })
+                    .limit(parseInt(amount) || 15);
 
                 if (error) throw error;
                 return res.status(200).json({ rows: data });

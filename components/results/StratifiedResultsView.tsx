@@ -92,8 +92,15 @@ const StratifiedResultsView: React.FC<Props> = ({ appState, setAppState, role, o
         if (!appState.selectedPopulation?.id) return;
         setIsSaving(true);
         try {
+            // OPTIMIZE: Remove raw_row from sample to reduce payload size
+            const optimizedSample = (updatedResults.sample || []).map(item => {
+                const { raw_row, ...rest } = item;
+                return rest;
+            });
+
             const currentMethodResults = {
                 ...updatedResults,
+                sample: optimizedSample,
                 method: appState.samplingMethod,
                 sampling_params: appState.samplingParams
             };
@@ -104,27 +111,30 @@ const StratifiedResultsView: React.FC<Props> = ({ appState, setAppState, role, o
                 last_method: appState.samplingMethod
             };
 
-            const { error } = await supabase
-                .from('audit_results')
-                .upsert({
+            // Use Proxy to save work in progress (Bypass Firewall)
+            const saveRes = await fetch('/api/sampling_proxy?action=save_work_in_progress', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
                     population_id: appState.selectedPopulation.id,
                     results_json: updatedStorage,
-                    sample_size: updatedResults.sampleSize,
-                    updated_at: new Date().toISOString()
-                }, { onConflict: 'population_id' });
+                    sample_size: updatedResults.sampleSize
+                })
+            });
 
-            if (error) {
-                console.error("Error saving results to DB:", error);
-                setSaveFeedback({ show: true, title: "Error de Sincronización", message: error.message, type: 'error' });
-            } else {
-                setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
-                if (!silent) {
-                    setSaveFeedback({ show: true, title: "Sincronizado", message: "Papel de trabajo actualizado.", type: 'success' });
-                }
+            if (!saveRes.ok) {
+                const errText = await saveRes.text();
+                throw new Error(`Proxy Save Failed (${saveRes.status}): ${errText}`);
+            }
+
+            setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
+
+            if (!silent) {
+                setSaveFeedback({ show: true, title: "Sincronizado", message: "Papel de trabajo actualizado.", type: 'success' });
             }
         } catch (err: any) {
-            console.error("Exception saving to DB:", err);
-            if (!silent) setSaveFeedback({ show: true, title: "Error Crítico", message: "Falla de red o servidor.", type: 'error' });
+            console.error("Error saving results via Proxy:", err);
+            if (!silent) setSaveFeedback({ show: true, title: "Error de Sincronización", message: err.message, type: 'error' });
         } finally {
             setIsSaving(false);
         }
@@ -156,16 +166,35 @@ const StratifiedResultsView: React.FC<Props> = ({ appState, setAppState, role, o
             const topErrorStratum = Object.entries(errorCounts).sort((a, b) => b[1] - a[1])[0][0];
 
             const amountToFetch = 15; // Ampliación estándar por estrato crítico
-            const existingIds = currentResults.sample.map(i => i.id);
+            const existingIds = new Set(currentResults.sample.map(i => i.id));
 
-            const { data: moreRows, error } = await supabase
-                .from('audit_data_rows')
-                .select('unique_id_col, monetary_value_col, raw_json')
-                .eq('population_id', appState.selectedPopulation.id)
-                .limit(amountToFetch)
-                .not('unique_id_col', 'in', `(${existingIds.map(id => `'${id}'`).join(',')})`);
+            // Strategy: Re-fetch universe (lightweight) -> Filter -> Hydrate (Bypass Firewall)
+            const uniRes = await fetch(`/api/sampling_proxy?action=get_universe&population_id=${appState.selectedPopulation.id}&detailed=false`);
+            if (!uniRes.ok) throw new Error('Proxy Universe Fetch Failed');
 
-            if (error) throw error;
+            const { data: allUniverse } = await uniRes.json();
+
+            // Filter candidates not in existing sample
+            const candidates = allUniverse.filter((r: any) => !existingIds.has(String(r.unique_id_col)));
+
+            const selection = candidates.slice(0, amountToFetch);
+
+            if (selection.length === 0) {
+                setSaveFeedback({ show: true, title: "Aviso", message: "No se encontraron más registros disponibles.", type: 'error' });
+                setIsExpanding(false);
+                return;
+            }
+
+            // Hydrate selection
+            const ids = selection.map((s: any) => s.unique_id_col);
+            const hydRes = await fetch('/api/sampling_proxy?action=get_rows_batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ population_id: appState.selectedPopulation.id, ids })
+            });
+
+            if (!hydRes.ok) throw new Error('Proxy Hydration Failed');
+            const { rows: moreRows } = await hydRes.json();
 
             if (moreRows && moreRows.length > 0) {
                 const mapping = appState.selectedPopulation.column_mapping;

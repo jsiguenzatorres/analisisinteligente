@@ -223,6 +223,12 @@ export interface RiskProfile {
     riskDistribution: { range: string; count: number }[];
     topRiskCategories: { name: string; score: number; alert: 'INFO' | 'WARNING' | 'CRITICAL' }[];
     gapAlerts: number;
+    factorsCount?: {
+        highValue: number;
+        weekend: number;
+        offHours: number;
+        roundAmount: number;
+    };
 }
 
 export interface RiskAnalysisResult {

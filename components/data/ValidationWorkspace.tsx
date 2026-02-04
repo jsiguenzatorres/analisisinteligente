@@ -290,8 +290,8 @@ const ValidationWorkspace: React.FC<Props> = ({ populationId, onValidationComple
                             {isAttributeOnly ? 'Frecuencia por Categoría (Top 10)' :
                                 isMonetaryCategory ? 'Monto por Categoría (Top 10)' : 'Estadísticas Básicas'}
                         </h3>
-                        <div style={{ width: '100%', height: 400, display: 'block' }} className="bg-white rounded-lg p-2 border border-slate-100">
-                            <ResponsiveContainer width="100%" height="100%">
+                        <div style={{ width: '100%', height: 400, display: 'block', minHeight: '400px' }} className="bg-white rounded-lg p-2 border border-slate-100">
+                            <ResponsiveContainer width="100%" height="100%" debounce={300} minWidth={200} minHeight={300}>
                                 {chartType === 'basic_stats' ? (
                                     <BarChart data={basicStatsData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -325,8 +325,8 @@ const ValidationWorkspace: React.FC<Props> = ({ populationId, onValidationComple
                             <h3 className="text-sm font-bold text-slate-600 mb-4 uppercase tracking-wider border-b pb-2">
                                 <i className="fas fa-history mr-2 text-orange-500"></i> Evolución Temporal
                             </h3>
-                            <div style={{ width: '100%', height: 400, display: 'block' }} className="bg-white rounded-lg p-2 border border-slate-100">
-                                <ResponsiveContainer width="100%" height="100%">
+                            <div style={{ width: '100%', height: 400, display: 'block', minHeight: '400px' }} className="bg-white rounded-lg p-2 border border-slate-100">
+                                <ResponsiveContainer width="100%" height="100%" debounce={300} minWidth={200} minHeight={300}>
                                     <LineChart data={timeChartData} margin={{ top: 20, right: 30, left: 10, bottom: 10 }}>
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
                                         <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} />

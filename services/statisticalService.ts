@@ -551,7 +551,19 @@ export const calculateSampleSize = (appState: AppState, realRows: AuditDataRow[]
                 }));
             } else {
                 const theoreticalSampleSize = Math.ceil(residualV / samplingInterval);
-                const statisticalSample = selectItems(theoreticalSampleSize, seed, statisticalPopulation, (_, row) => ({
+                
+                // ✅ FIX CRÍTICO: Limitar theoreticalSampleSize al tamaño de población disponible
+                const maxSampleSize = Math.min(theoreticalSampleSize, statisticalPopulation.length);
+                
+                // ✅ VALIDACIÓN: Verificar que samplingInterval sea válido
+                if (!isFinite(samplingInterval) || samplingInterval <= 0) {
+                    console.error('❌ Intervalo de muestreo inválido:', samplingInterval);
+                    throw new Error('Parámetros MUS generan valores matemáticos inválidos. Verifica Error Esperado y Confianza.');
+                }
+                
+                console.log(`📊 MUS: tamaño teórico=${theoreticalSampleSize}, máximo permitido=${maxSampleSize}, población=${statisticalPopulation.length}`);
+                
+                const statisticalSample = selectItems(maxSampleSize, seed, statisticalPopulation, (_, row) => ({
                     risk_flag: (row as any)?._is_originally_negative ? 'NEGATIVO_ABS' : undefined,
                     absolute_value: (row as any)?._is_originally_negative ? row?.monetary_value_col : undefined
                 }));

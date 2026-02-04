@@ -26,6 +26,10 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
     });
     const [helpContent, setHelpContent] = useState<{ title: string, text: string, auditImpact: string } | null>(null);
 
+    // Estados para vista jerárquica
+    const [expandedRiskLevels, setExpandedRiskLevels] = useState<Set<string>>(new Set(['Alto'])); // Alto expandido por defecto
+    const [expandedAnalysisTypes, setExpandedAnalysisTypes] = useState<Set<string>>(new Set());
+
     const AUDIT_HELP = useMemo(() => {
         const expandedItems = currentResults.sample.filter(i => i.risk_factors?.some(f => f.includes('Ampliación'))).length;
         const initialItems = currentResults.sample.length - expandedItems;
@@ -80,6 +84,314 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
 
     const isAcceptable = totalErrorAmount <= materiality;
     const canExpand = errorsFound > 0 && expansionMetrics.recommendedExpansion > 0 && currentResults.sampleSize < totalRows;
+
+    // Funciones para vista jerárquica
+    const getRiskLevel = (riskScore: number, riskFactors: string[]): 'Alto' | 'Medio' | 'Bajo' => {
+        // Si tiene factores de riesgo críticos, es Alto independientemente del score
+        const criticalFactors = ['benford', 'outlier', 'duplicado', 'splitting', 'gap', 'isolation', 'ml_anomaly'];
+        const hasCriticalFactor = riskFactors && riskFactors.some(f => 
+            criticalFactors.some(cf => f.toLowerCase().includes(cf))
+        );
+        
+        // Si tiene 3+ factores de riesgo, es Alto
+        if (riskFactors && riskFactors.length >= 3) return 'Alto';
+        
+        // Si tiene 2+ factores o 1 factor crítico, es Alto
+        if ((riskFactors && riskFactors.length >= 2) || hasCriticalFactor) return 'Alto';
+        
+        // Si tiene 1 factor no crítico, es Medio
+        if (riskFactors && riskFactors.length === 1) return 'Medio';
+        
+        // Fallback al score solo si no hay factores
+        if (riskScore > 80) return 'Alto';
+        if (riskScore > 50) return 'Medio';
+        return 'Bajo';
+    };
+
+    const getAnalysisType = (riskFactors: string[]): string => {
+        if (!riskFactors || riskFactors.length === 0) return 'Otros';
+        
+        const typeMap: { [key: string]: string } = {
+            'benford': 'Ley de Benford',
+            'enhanced_benford': 'Benford Avanzado',
+            'segundo_digito': 'Benford Avanzado',
+            'outlier': 'Valores Atípicos',
+            'duplicado': 'Duplicados',
+            'redondo': 'Números Redondos',
+            'entropy': 'Entropía Categórica',
+            'categoria': 'Entropía Categórica',
+            'splitting': 'Fraccionamiento',
+            'fraccionamiento': 'Fraccionamiento',
+            'gap': 'Gaps Secuenciales',
+            'secuencial': 'Gaps Secuenciales',
+            'isolation': 'ML Anomalías',
+            'ml_anomaly': 'ML Anomalías',
+            'actor': 'Actores Sospechosos',
+            'usuario_sospechoso': 'Actores Sospechosos',
+            'ampliación': 'Ampliación de Muestra',
+            'fase': 'Ampliación de Muestra'
+        };
+        
+        for (const factor of riskFactors) {
+            const lowerFactor = factor.toLowerCase();
+            for (const [key, value] of Object.entries(typeMap)) {
+                if (lowerFactor.includes(key)) {
+                    return value;
+                }
+            }
+        }
+        
+        return 'Otros';
+    };
+
+    const getCategoryFromItem = (item: AuditSampleItem): string | null => {
+        if (!appState.selectedPopulation?.column_mapping) return null;
+        
+        const categoryField = appState.selectedPopulation.column_mapping.category;
+        if (!categoryField) return null;
+        
+        try {
+            // Intentar primero con raw_row, luego con el item directamente
+            let rawData = item.raw_row;
+            
+            if (typeof rawData === 'string') {
+                rawData = JSON.parse(rawData);
+            }
+            
+            // Si raw_row no existe o no tiene la categoría, buscar en el item directamente
+            if (!rawData || !rawData[categoryField]) {
+                // Buscar en el item directamente usando el nombre del campo
+                return item[categoryField as keyof AuditSampleItem] as string || null;
+            }
+            
+            return rawData[categoryField] || null;
+        } catch (error) {
+            console.warn('Error extrayendo categoría:', error);
+            return null;
+        }
+    };
+
+    const organizeHierarchically = (items: AuditSampleItem[]) => {
+        const hasCategoryMapping = !!appState.selectedPopulation?.column_mapping?.category;
+        
+        // Debug: Ver qué tienen los items
+        console.log('🔍 DEBUG - Primer item de la muestra:', items[0]);
+        console.log('🔍 DEBUG - risk_factors del primer item:', items[0]?.risk_factors);
+        console.log('🔍 DEBUG - Mapeo de categorías:', appState.selectedPopulation?.column_mapping);
+        
+        const hierarchy: {
+            [riskLevel: string]: {
+                [analysisType: string]: {
+                    [category: string]: AuditSampleItem[]
+                }
+            }
+        } = {
+            'Alto': {},
+            'Medio': {},
+            'Bajo': {}
+        };
+        
+        items.forEach(item => {
+            const riskScore = item.risk_score || 0;
+            const riskFactors = item.risk_factors || [];
+            const riskLevel = getRiskLevel(riskScore, riskFactors);
+            const analysisType = getAnalysisType(riskFactors);
+            const category = hasCategoryMapping ? (getCategoryFromItem(item) || 'Sin Categoría') : 'Todos';
+            
+            // Debug: Ver clasificación del primer item
+            if (items.indexOf(item) === 0) {
+                console.log('🔍 DEBUG - Clasificación del primer item:');
+                console.log('  - riskScore:', riskScore);
+                console.log('  - riskFactors:', riskFactors);
+                console.log('  - riskLevel:', riskLevel);
+                console.log('  - analysisType:', analysisType);
+                console.log('  - category:', category);
+            }
+            
+            if (!hierarchy[riskLevel][analysisType]) {
+                hierarchy[riskLevel][analysisType] = {};
+            }
+            
+            if (!hierarchy[riskLevel][analysisType][category]) {
+                hierarchy[riskLevel][analysisType][category] = [];
+            }
+            
+            hierarchy[riskLevel][analysisType][category].push(item);
+        });
+        
+        return { hierarchy, hasCategoryMapping };
+    };
+
+    const toggleRiskLevel = (level: string) => {
+        setExpandedRiskLevels(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(level)) {
+                newSet.delete(level);
+            } else {
+                newSet.add(level);
+            }
+            return newSet;
+        });
+    };
+
+    const toggleAnalysisType = (key: string) => {
+        setExpandedAnalysisTypes(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(key)) {
+                newSet.delete(key);
+            } else {
+                newSet.add(key);
+            }
+            return newSet;
+        });
+    };
+
+    // Función helper para renderizar tabla de items
+    const renderItemsTable = (
+        items: AuditSampleItem[],
+        currentResults: AuditResults,
+        setCurrentResults: React.Dispatch<React.SetStateAction<AuditResults>>,
+        setAppState: React.Dispatch<React.SetStateAction<AppState>>,
+        saveToDb: (results: AuditResults, silent: boolean) => void,
+        isApproved: boolean,
+        formatMoney: (amount: number) => string,
+        setSaveFeedback: React.Dispatch<React.SetStateAction<any>>
+    ) => {
+        return (
+            <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+                <table className="w-full text-left">
+                    <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase">
+                        <tr>
+                            <th className="px-4 py-3 w-12 text-center">#</th>
+                            <th className="px-4 py-3">ID Registro</th>
+                            <th className="px-4 py-3">Riesgo IA</th>
+                            <th className="px-4 py-3 text-right">Valor Libro</th>
+                            <th className="px-4 py-3 text-center">Revisión</th>
+                            <th className="px-4 py-3">Punto de Auditoría / Hallazgo</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                        {items.map((item, idx) => {
+                            const globalIdx = currentResults.sample.indexOf(item);
+                            const isEx = item.compliance_status === 'EXCEPCION';
+                            const riskScore = item.risk_score || 0;
+                            const riskLevelLabel = riskScore > 80 ? 'CRÍTICO' : riskScore > 50 ? 'MEDIO' : 'ESTÁNDAR';
+                            const riskColor = riskScore > 80 ? 'bg-rose-500' : riskScore > 50 ? 'bg-amber-500' : 'bg-emerald-500';
+
+                            return (
+                                <tr key={globalIdx} className={`hover:bg-slate-50 transition-colors ${isEx ? 'bg-rose-50/40' : riskScore > 80 ? 'bg-rose-50/10' : ''}`}>
+                                    <td className="px-4 py-4 text-[10px] font-black text-slate-300 text-center">{globalIdx + 1}</td>
+                                    <td className="px-4 py-4">
+                                        <div className="font-black text-xs text-slate-800">{item.id}</div>
+                                        <div className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter truncate max-w-[120px]">
+                                            {item.risk_flag || 'Selección Aleatoria'}
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-4">
+                                        <div className="flex items-center gap-2">
+                                            <div className={`h-1.5 w-10 rounded-full overflow-hidden bg-slate-100`}>
+                                                <div className={`h-full ${riskColor}`} style={{ width: `${riskScore}%` }}></div>
+                                            </div>
+                                            <span className="text-[9px] font-black text-slate-500">{riskLevelLabel}</span>
+                                        </div>
+                                        <div className="flex flex-wrap gap-1 mt-1">
+                                            {item.risk_factors && item.risk_factors.length > 0 ? (
+                                                item.risk_factors.slice(0, 3).map((factor, i) => (
+                                                    <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-[8px] font-medium rounded border border-slate-200">
+                                                        {factor}
+                                                    </span>
+                                                ))
+                                            ) : (
+                                                <span className="text-[8px] text-slate-300 italic">Sin factores</span>
+                                            )}
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-4 text-right">
+                                        <div className="text-xs font-bold text-slate-600 font-mono italic">{formatMoney(item.value || 0)}</div>
+                                    </td>
+                                    <td className="px-4 py-4 text-center">
+                                        <button
+                                            onClick={() => {
+                                                const ns = [...currentResults.sample];
+                                                ns[globalIdx].compliance_status = ns[globalIdx].compliance_status === 'OK' ? 'EXCEPCION' : 'OK';
+                                                if (ns[globalIdx].compliance_status === 'OK') ns[globalIdx].error_amount = 0;
+                                                const updated = { ...currentResults, sample: ns };
+                                                setCurrentResults(updated);
+                                                setAppState(prev => ({ ...prev, results: updated }));
+                                                saveToDb(updated, true);
+                                            }}
+                                            disabled={isApproved}
+                                            className={`px-4 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${isEx ? 'bg-rose-600 text-white shadow-lg shadow-rose-200' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
+                                        >
+                                            {isEx ? 'CON ERROR' : 'SIN NOVEDAD'}
+                                        </button>
+                                    </td>
+                                    <td className="px-4 py-4">
+                                        <div className="flex flex-col gap-2">
+                                            <textarea
+                                                disabled={isApproved}
+                                                value={item.error_description || ''}
+                                                onChange={e => {
+                                                    const ns = [...currentResults.sample];
+                                                    ns[globalIdx].error_description = e.target.value;
+                                                    const updated = { ...currentResults, sample: ns };
+                                                    setCurrentResults(updated);
+                                                    setAppState(prev => ({ ...prev, results: updated }));
+                                                }}
+                                                onBlur={() => saveToDb(currentResults, true)}
+                                                className={`w-full bg-slate-50 border-none p-3 rounded-lg text-[10px] font-medium min-h-[50px] focus:ring-2 focus:ring-indigo-500/10 placeholder:text-slate-300 ${isEx ? 'bg-white shadow-inner' : ''}`}
+                                                placeholder="Observaciones de auditoría..."
+                                            />
+                                            {isEx && (
+                                                <div className="flex items-center gap-2 animate-fade-in">
+                                                    <span className="text-[8px] font-black text-rose-400 uppercase">Impacto $:</span>
+                                                    <input
+                                                        type="number"
+                                                        value={item.error_amount || ''}
+                                                        onChange={e => {
+                                                            const val = parseFloat(e.target.value);
+                                                            const ns = [...currentResults.sample];
+
+                                                            if (val > item.value) {
+                                                                setSaveFeedback({
+                                                                    show: true,
+                                                                    title: "Validación Profesional",
+                                                                    message: `El error (${formatMoney(val)}) no puede exceder el valor del ítem (${formatMoney(item.value)}).`,
+                                                                    type: 'error'
+                                                                });
+                                                                ns[globalIdx].error_amount = item.value;
+                                                            } else if (val <= 0) {
+                                                                setSaveFeedback({
+                                                                    show: true,
+                                                                    title: "Aviso Técnico",
+                                                                    message: "Un hallazgo cuantitativo requiere un valor positivo mayor a cero.",
+                                                                    type: 'error'
+                                                                });
+                                                                ns[globalIdx].error_amount = 0;
+                                                            } else {
+                                                                ns[globalIdx].error_amount = val;
+                                                            }
+
+                                                            const updated = { ...currentResults, sample: ns };
+                                                            setCurrentResults(updated);
+                                                            setAppState(prev => ({ ...prev, results: updated }));
+                                                        }}
+                                                        onBlur={() => saveToDb(currentResults, true)}
+                                                        className="w-28 bg-rose-50 border border-rose-100 rounded-lg px-2 py-1 text-[10px] font-bold text-rose-700 focus:ring-2 focus:ring-rose-200 shadow-inner"
+                                                        placeholder="Monto"
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+        );
+    };
 
     const saveToDb = async (updatedResults: AuditResults, silent = true) => {
         if (!appState.selectedPopulation?.id) return;
@@ -314,127 +626,143 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                     </div>
                 </div>
                 <div className="overflow-x-auto max-h-[600px] custom-scrollbar">
-                    <table className="w-full text-left">
-                        <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase sticky top-0 z-10 shadow-sm">
-                            <tr>
-                                <th className="px-10 py-6 w-16 text-center">#</th>
-                                <th className="px-10 py-6">ID Registro</th>
-                                <th className="px-10 py-6">Riesgo IA</th>
-                                <th className="px-10 py-6 text-right">Valor Libro</th>
-                                <th className="px-10 py-6 text-center">Revisión</th>
-                                <th className="px-10 py-6">Punto de Auditoría / Hallazgo</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {currentResults.sample.map((item, idx) => {
-                                const isEx = item.compliance_status === 'EXCEPCION';
-                                const riskScore = item.risk_score || 0;
-                                const riskLevel = riskScore > 80 ? 'CRÍTICO' : riskScore > 50 ? 'MEDIO' : 'ESTÁNDAR';
-                                const riskColor = riskScore > 80 ? 'bg-rose-500' : riskScore > 50 ? 'bg-amber-500' : 'bg-emerald-500';
+                    {(() => {
+                        const { hierarchy, hasCategoryMapping } = organizeHierarchically(currentResults.sample);
+                        const riskLevelColors = {
+                            'Alto': { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', icon: 'text-red-500' },
+                            'Medio': { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-700', icon: 'text-yellow-500' },
+                            'Bajo': { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700', icon: 'text-green-500' }
+                        };
 
-                                return (
-                                    <tr key={idx} className={`hover:bg-slate-50 transition-colors ${isEx ? 'bg-rose-50/40' : riskScore > 80 ? 'bg-rose-50/10' : ''}`}>
-                                        <td className="px-10 py-6 text-[11px] font-black text-slate-300 text-center">{idx + 1}</td>
-                                        <td className="px-10 py-6">
-                                            <div className="font-black text-[12px] text-slate-800">{item.id}</div>
-                                            <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter truncate max-w-[150px]">
-                                                {item.risk_flag || 'Selección Aleatoria'}
-                                            </div>
-                                        </td>
-                                        <td className="px-10 py-6">
-                                            <div className="flex items-center gap-2">
-                                                <div className={`h-1.5 w-12 rounded-full overflow-hidden bg-slate-100`}>
-                                                    <div className={`h-full ${riskColor}`} style={{ width: `${riskScore}%` }}></div>
-                                                </div>
-                                                <span className="text-[10px] font-black text-slate-500">{riskLevel}</span>
-                                            </div>
-                                            <div className="text-[8px] text-slate-300 font-bold mt-1 uppercase truncate max-w-[140px]">
-                                                {item.risk_factors?.join(', ') || 'Sin factores clave'}
-                                            </div>
-                                        </td>
-                                        <td className="px-10 py-6 text-right">
-                                            <div className="text-[12px] font-bold text-slate-600 font-mono italic">{formatMoney(item.value || 0)}</div>
-                                        </td>
-                                        <td className="px-10 py-6 text-center">
-                                            <button
-                                                onClick={() => {
-                                                    const ns = [...currentResults.sample];
-                                                    ns[idx].compliance_status = ns[idx].compliance_status === 'OK' ? 'EXCEPCION' : 'OK';
-                                                    if (ns[idx].compliance_status === 'OK') ns[idx].error_amount = 0;
-                                                    const updated = { ...currentResults, sample: ns };
-                                                    setCurrentResults(updated);
-                                                    setAppState(prev => ({ ...prev, results: updated }));
-                                                    saveToDb(updated, true);
-                                                }}
-                                                disabled={isApproved}
-                                                className={`px-6 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${isEx ? 'bg-rose-600 text-white shadow-lg shadow-rose-200' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
+                        return (
+                            <div className="divide-y divide-slate-100">
+                                {Object.entries(hierarchy).map(([riskLevel, analysisTypes]) => {
+                                    const totalInLevel = Object.values(analysisTypes).reduce((sum, categories) => 
+                                        sum + Object.values(categories).reduce((s, items) => s + items.length, 0), 0
+                                    );
+                                    if (totalInLevel === 0) return null;
+
+                                    const colors = riskLevelColors[riskLevel as keyof typeof riskLevelColors];
+                                    const isExpanded = expandedRiskLevels.has(riskLevel);
+
+                                    return (
+                                        <div key={riskLevel} className="bg-white">
+                                            {/* Nivel 1: Risk Level */}
+                                            <div
+                                                onClick={() => toggleRiskLevel(riskLevel)}
+                                                className={`cursor-pointer p-6 ${colors.bg} border-l-4 ${colors.border} hover:opacity-80 transition-all`}
                                             >
-                                                {isEx ? 'CON ERROR' : 'SIN NOVEDAD'}
-                                            </button>
-                                        </td>
-                                        <td className="px-10 py-6">
-                                            <div className="flex flex-col gap-2">
-                                                <textarea
-                                                    disabled={isApproved}
-                                                    value={item.error_description || ''}
-                                                    onChange={e => {
-                                                        const ns = [...currentResults.sample];
-                                                        ns[idx].error_description = e.target.value;
-                                                        const updated = { ...currentResults, sample: ns };
-                                                        setCurrentResults(updated);
-                                                        setAppState(prev => ({ ...prev, results: updated }));
-                                                    }}
-                                                    onBlur={() => saveToDb(currentResults, true)}
-                                                    className={`w-full bg-slate-50 border-none p-4 rounded-xl text-[11px] font-medium min-h-[60px] focus:ring-4 focus:ring-indigo-500/10 placeholder:text-slate-300 ${isEx ? 'bg-white shadow-inner' : ''}`}
-                                                    placeholder="Observaciones de auditoría..."
-                                                />
-                                                {isEx && (
-                                                    <div className="flex items-center gap-2 animate-fade-in">
-                                                        <span className="text-[9px] font-black text-rose-400 uppercase">Impacto $:</span>
-                                                        <input
-                                                            type="number"
-                                                            value={item.error_amount || ''}
-                                                            onChange={e => {
-                                                                const val = parseFloat(e.target.value);
-                                                                const ns = [...currentResults.sample];
-
-                                                                if (val > item.value) {
-                                                                    setSaveFeedback({
-                                                                        show: true,
-                                                                        title: "Validación Profesional",
-                                                                        message: `El error (${formatMoney(val)}) no puede exceder el valor del ítem (${formatMoney(item.value)}).`,
-                                                                        type: 'error'
-                                                                    });
-                                                                    ns[idx].error_amount = item.value;
-                                                                } else if (val <= 0) {
-                                                                    setSaveFeedback({
-                                                                        show: true,
-                                                                        title: "Aviso Técnico",
-                                                                        message: "Un hallazgo cuantitativo requiere un valor positivo mayor a cero.",
-                                                                        type: 'error'
-                                                                    });
-                                                                    ns[idx].error_amount = 0;
-                                                                } else {
-                                                                    ns[idx].error_amount = val;
-                                                                }
-
-                                                                const updated = { ...currentResults, sample: ns };
-                                                                setCurrentResults(updated);
-                                                                setAppState(prev => ({ ...prev, results: updated }));
-                                                            }}
-                                                            onBlur={() => saveToDb(currentResults, true)}
-                                                            className="w-32 bg-rose-50 border border-rose-100 rounded-lg px-2 py-1 text-[11px] font-bold text-rose-700 focus:ring-2 focus:ring-rose-200 shadow-inner"
-                                                            placeholder="Monto"
-                                                        />
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-4">
+                                                        <i className={`fas ${isExpanded ? 'fa-chevron-down' : 'fa-chevron-right'} ${colors.icon} text-sm`}></i>
+                                                        <div className="flex items-center gap-3">
+                                                            <i className={`fas fa-exclamation-triangle ${colors.icon} text-lg`}></i>
+                                                            <span className={`font-black text-base uppercase tracking-wider ${colors.text}`}>
+                                                                Riesgo {riskLevel}
+                                                            </span>
+                                                        </div>
                                                     </div>
-                                                )}
+                                                    <div className="flex items-center gap-6">
+                                                        <span className={`text-sm font-bold ${colors.text}`}>
+                                                            {totalInLevel} registro{totalInLevel !== 1 ? 's' : ''}
+                                                        </span>
+                                                        <span className={`px-3 py-1 ${colors.bg} ${colors.border} border rounded-full text-xs font-black ${colors.text}`}>
+                                                            {Object.keys(analysisTypes).length} tipo{Object.keys(analysisTypes).length !== 1 ? 's' : ''}
+                                                        </span>
+                                                    </div>
+                                                </div>
                                             </div>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
+
+                                            {/* Nivel 2: Analysis Types */}
+                                            {isExpanded && (
+                                                <div className="bg-slate-50">
+                                                    {Object.entries(analysisTypes).map(([analysisType, categories]) => {
+                                                        const totalInType = Object.values(categories).reduce((sum, items) => sum + items.length, 0);
+                                                        if (totalInType === 0) return null;
+                                                        
+                                                        const typeKey = `${riskLevel}-${analysisType}`;
+                                                        const isTypeExpanded = expandedAnalysisTypes.has(typeKey);
+
+                                                        return (
+                                                            <div key={typeKey} className="border-b border-slate-100 last:border-b-0">
+                                                                {/* Nivel 2: Analysis Type Header */}
+                                                                <div
+                                                                    onClick={() => toggleAnalysisType(typeKey)}
+                                                                    className="cursor-pointer p-4 pl-16 hover:bg-slate-100 transition-all"
+                                                                >
+                                                                    <div className="flex items-center justify-between">
+                                                                        <div className="flex items-center gap-4">
+                                                                            <i className={`fas ${isTypeExpanded ? 'fa-chevron-down' : 'fa-chevron-right'} text-slate-400 text-sm`}></i>
+                                                                            <span className="font-bold text-sm text-slate-700">
+                                                                                {analysisType}
+                                                                            </span>
+                                                                        </div>
+                                                                        <span className="text-xs font-bold text-slate-500 bg-white px-3 py-1 rounded-full border border-slate-200">
+                                                                            {totalInType} item{totalInType !== 1 ? 's' : ''}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Nivel 3: Categories (si hay mapeo) o Items directamente */}
+                                                                {isTypeExpanded && (
+                                                                    hasCategoryMapping ? (
+                                                                        // CON categorías: Mostrar nivel adicional
+                                                                        <div className="pl-20 pr-6 pb-2 bg-slate-50">
+                                                                            {Object.entries(categories).map(([category, items]) => {
+                                                                                if (items.length === 0) return null;
+                                                                                
+                                                                                const categoryKey = `${typeKey}-${category}`;
+                                                                                const isCategoryExpanded = expandedAnalysisTypes.has(categoryKey);
+
+                                                                                return (
+                                                                                    <div key={categoryKey} className="mb-2">
+                                                                                        {/* Nivel 3: Category Header */}
+                                                                                        <div
+                                                                                            onClick={() => toggleAnalysisType(categoryKey)}
+                                                                                            className="cursor-pointer p-3 bg-white rounded-lg hover:bg-slate-50 transition-all border border-slate-200 mb-2"
+                                                                                        >
+                                                                                            <div className="flex items-center justify-between">
+                                                                                                <div className="flex items-center gap-3">
+                                                                                                    <i className={`fas ${isCategoryExpanded ? 'fa-chevron-down' : 'fa-chevron-right'} text-slate-400 text-xs`}></i>
+                                                                                                    <i className="fas fa-folder text-indigo-500 text-sm"></i>
+                                                                                                    <span className="font-bold text-xs text-slate-700">
+                                                                                                        {category}
+                                                                                                    </span>
+                                                                                                </div>
+                                                                                                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-full">
+                                                                                                    {items.length} item{items.length !== 1 ? 's' : ''}
+                                                                                                </span>
+                                                                                            </div>
+                                                                                        </div>
+
+                                                                                        {/* Nivel 4: Items Table (con categorías) */}
+                                                                                        {isCategoryExpanded && (
+                                                                                            <div className="pl-6">
+                                                                                                {renderItemsTable(items, currentResults, setCurrentResults, setAppState, saveToDb, isApproved, formatMoney, setSaveFeedback)}
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    ) : (
+                                                                        // SIN categorías: Mostrar items directamente
+                                                                        <div className="pl-16 pr-6 pb-4">
+                                                                            {renderItemsTable(categories['Todos'] || [], currentResults, setCurrentResults, setAppState, saveToDb, isApproved, formatMoney, setSaveFeedback)}
+                                                                        </div>
+                                                                    )
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        );
+                    })()}
                 </div>
             </div>
         </div>

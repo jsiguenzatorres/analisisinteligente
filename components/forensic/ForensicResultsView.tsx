@@ -3,11 +3,17 @@ import { AdvancedAnalysis, AuditPopulation } from '../../types';
 import Modal from '../ui/Modal';
 import ForensicDetailsModal from './ForensicDetailsModal';
 import { samplingProxyFetch, FetchTimeoutError, FetchNetworkError } from '../../services/fetchUtils';
+import { generateForensicReport } from '../../services/forensicReportService';
 
 interface Props {
     population: AuditPopulation;
     analysis: AdvancedAnalysis;
     onClose: () => void;
+    riskChartData?: {
+        upperErrorLimit: number;
+        tolerableError: number;
+        method: string;
+    };
 }
 
 interface ForensicMetric {
@@ -20,9 +26,10 @@ interface ForensicMetric {
     icon: string;
 }
 
-const ForensicResultsView: React.FC<Props> = ({ population, analysis, onClose }) => {
+const ForensicResultsView: React.FC<Props> = ({ population, analysis, onClose, riskChartData }) => {
     const [detailModalOpen, setDetailModalOpen] = useState(false);
     const [detailType, setDetailType] = useState<string | null>(null);
+    const [isGeneratingReport, setIsGeneratingReport] = useState(false);
 
     // Construir métricas forenses
     const forensicMetrics: ForensicMetric[] = useMemo(() => {
@@ -273,6 +280,28 @@ const ForensicResultsView: React.FC<Props> = ({ population, analysis, onClose })
         }
     };
 
+    const handleExportReport = async () => {
+        if (isGeneratingReport) return;
+        
+        setIsGeneratingReport(true);
+        try {
+            await generateForensicReport({
+                population,
+                analysis,
+                riskChartData,
+                generatedBy: 'Auditor Principal',
+                generatedDate: new Date()
+            });
+            
+            console.log('Reporte forense generado exitosamente');
+        } catch (error) {
+            console.error('Error generando reporte forense:', error);
+            alert('Error al generar el reporte forense');
+        } finally {
+            setIsGeneratingReport(false);
+        }
+    };
+
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full mx-4 max-h-[90vh] overflow-hidden">
@@ -285,12 +314,31 @@ const ForensicResultsView: React.FC<Props> = ({ population, analysis, onClose })
                                 Población: {population.audit_name} • {population.total_rows.toLocaleString()} registros
                             </p>
                         </div>
-                        <button
-                            onClick={onClose}
-                            className="text-white hover:text-purple-200 text-2xl"
-                        >
-                            ×
-                        </button>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={handleExportReport}
+                                disabled={isGeneratingReport}
+                                className="px-4 py-2 bg-white text-purple-600 rounded-lg hover:bg-purple-50 transition-colors font-bold text-sm flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {isGeneratingReport ? (
+                                    <>
+                                        <i className="fas fa-spinner fa-spin mr-2"></i>
+                                        Generando...
+                                    </>
+                                ) : (
+                                    <>
+                                        <i className="fas fa-file-pdf mr-2"></i>
+                                        Exportar PDF
+                                    </>
+                                )}
+                            </button>
+                            <button
+                                onClick={onClose}
+                                className="text-white hover:text-purple-200 text-2xl"
+                            >
+                                ×
+                            </button>
+                        </div>
                     </div>
                 </div>
 

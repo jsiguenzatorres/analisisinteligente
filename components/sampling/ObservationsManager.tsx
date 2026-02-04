@@ -4,6 +4,7 @@ import { SamplingMethod, AuditObservation, ObservationEvidence } from '../../typ
 import { supabase } from '../../services/supabaseClient';
 import { useToast } from '../ui/ToastContext';
 import Modal from '../ui/Modal';
+import { generateObservationsReport } from '../../services/observationsReportService';
 
 interface Props {
     populationId: string;
@@ -22,6 +23,7 @@ const ObservationsManager: React.FC<Props> = ({ populationId, method, onObservat
     const [uploadingFile, setUploadingFile] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [obsToDelete, setObsToDelete] = useState<string | null>(null);
+    const [isGeneratingReport, setIsGeneratingReport] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const { addToast } = useToast();
 
@@ -212,6 +214,28 @@ const ObservationsManager: React.FC<Props> = ({ populationId, method, onObservat
         return 'fa-file-alt text-slate-400';
     };
 
+    const handleExportReport = async () => {
+        if (isGeneratingReport) return;
+        
+        setIsGeneratingReport(true);
+        try {
+            await generateObservationsReport({
+                populationName: `Población ID: ${populationId}`,
+                samplingMethod: method,
+                observations: observations,
+                generatedBy: CURRENT_USER,
+                generatedDate: new Date()
+            });
+            
+            addToast('Expediente PDF generado exitosamente', 'success');
+        } catch (error) {
+            console.error('Error generando expediente:', error);
+            addToast('Error al generar el expediente PDF', 'error');
+        } finally {
+            setIsGeneratingReport(false);
+        }
+    };
+
     return (
         <div className="space-y-8 animate-fade-in">
             <div className="flex justify-between items-center border-b border-slate-100 pb-5">
@@ -224,11 +248,30 @@ const ObservationsManager: React.FC<Props> = ({ populationId, method, onObservat
                         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Control de Evidencia NIA 530</p>
                     </div>
                 </div>
-                {!isAdding && !editingId && (
-                    <button onClick={() => setIsAdding(true)} className="px-6 py-3 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 shadow-lg transition-all flex items-center">
-                        <i className="fas fa-plus mr-2"></i> Documentar Observación
+                <div className="flex gap-3">
+                    <button 
+                        onClick={handleExportReport}
+                        disabled={isGeneratingReport}
+                        className="px-4 py-2 bg-purple-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-700 shadow-lg transition-all flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {isGeneratingReport ? (
+                            <>
+                                <i className="fas fa-spinner fa-spin mr-2"></i>
+                                Generando...
+                            </>
+                        ) : (
+                            <>
+                                <i className="fas fa-file-pdf mr-2"></i>
+                                Exportar PDF
+                            </>
+                        )}
                     </button>
-                )}
+                    {!isAdding && !editingId && (
+                        <button onClick={() => setIsAdding(true)} className="px-6 py-3 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 shadow-lg transition-all flex items-center">
+                            <i className="fas fa-plus mr-2"></i> Documentar Observación
+                        </button>
+                    )}
+                </div>
             </div>
 
             {(isAdding || editingId) && (

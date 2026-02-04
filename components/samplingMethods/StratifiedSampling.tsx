@@ -13,6 +13,57 @@ const StratifiedSampling: React.FC<Props> = ({ appState, setAppState }) => {
     const params = appState.samplingParams.stratified;
     const categoryColumn = appState.selectedPopulation?.column_mapping.category;
     const subcategoryColumn = appState.selectedPopulation?.column_mapping.subcategory;
+    const populationSize = appState.selectedPopulation?.total_rows || 0;
+
+    // Calcular estratos sugeridos usando regla de Sturges
+    const calculateSuggestedStrata = (n: number): number => {
+        if (n < 50) return 2;
+        if (n < 100) return 3;
+        // Regla de Sturges: k = 1 + 3.322 * log10(N)
+        const k = Math.ceil(1 + 3.322 * Math.log10(n));
+        return Math.min(Math.max(k, 2), 6); // Entre 2 y 6 estratos
+    };
+
+    const suggestedStrata = calculateSuggestedStrata(populationSize);
+
+    // Determinar si debe usar estratos automáticos o manuales
+    const shouldUseAutoStrata = params.basis !== 'Monetary';
+
+    // Mensaje informativo según la base seleccionada
+    const getStrataInfo = () => {
+        if (params.basis === 'Category' || params.selectedVariables?.includes('Category')) {
+            return {
+                type: 'auto',
+                message: 'Se creará un estrato por cada categoría única detectada en los datos (Basado en regla de Sturges).',
+                icon: 'fa-tags',
+                color: 'purple'
+            };
+        }
+        if (params.basis === 'Subcategory' || params.selectedVariables?.includes('Subcategory')) {
+            return {
+                type: 'auto',
+                message: 'Se creará un estrato por cada subcategoría única detectada en los datos (Basado en regla de Sturges).',
+                icon: 'fa-tag',
+                color: 'pink'
+            };
+        }
+        if (params.basis === 'MultiVariable') {
+            return {
+                type: 'auto',
+                message: 'Se creará un estrato por cada combinación única de categoría y subcategoría (Basado en regla de Sturges).',
+                icon: 'fa-magic',
+                color: 'indigo'
+            };
+        }
+        return {
+            type: 'manual',
+            message: `Basado en la regla de Sturges, se sugieren ${suggestedStrata} estratos para ${populationSize} registros.`,
+            icon: 'fa-coins',
+            color: 'indigo'
+        };
+    };
+
+    const strataInfo = getStrataInfo();
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const { name, value, type } = e.target;
@@ -193,16 +244,64 @@ const StratifiedSampling: React.FC<Props> = ({ appState, setAppState }) => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                {/* Cantidad de Estratos - Sistema Híbrido */}
                 <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-lg border-t-4 border-t-indigo-500">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center mb-4">
                         Cantidad de Estratos
                         <span className="ml-2"><InfoHelper title={ASSISTANT_CONTENT.cantidadEstratos.title} content={ASSISTANT_CONTENT.cantidadEstratos.content} /></span>
                     </label>
-                    <input type="number" name="strataCount" value={params.strataCount} onChange={handleChange} min="2" max="10" className="w-full text-3xl font-black text-slate-800 border-none p-0 focus:ring-0" />
-                    <div className="mt-2 h-1 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-indigo-500" style={{ width: `${(params.strataCount / 10) * 100}%` }}></div>
-                    </div>
+
+                    {strataInfo.type === 'auto' ? (
+                        // Modo Automático (Categoría/Subcategoría)
+                        <div className="space-y-4">
+                            <div className={`p-4 rounded-xl bg-${strataInfo.color}-50 border border-${strataInfo.color}-200`}>
+                                <div className="flex items-center gap-3 mb-2">
+                                    <i className={`fas ${strataInfo.icon} text-${strataInfo.color}-600 text-xl`}></i>
+                                    <span className="text-xs font-black text-${strataInfo.color}-900 uppercase">Automático</span>
+                                </div>
+                                <p className="text-[11px] text-slate-600 leading-relaxed">
+                                    {strataInfo.message}
+                                </p>
+                            </div>
+                            <div className="text-center p-3 bg-slate-50 rounded-xl">
+                                <p className="text-[9px] text-slate-400 uppercase tracking-widest mb-1">Estratos se calcularán al generar</p>
+                                <p className="text-2xl font-black text-slate-700">
+                                    <i className="fas fa-magic text-indigo-500"></i>
+                                </p>
+                            </div>
+                        </div>
+                    ) : (
+                        // Modo Manual (Monetario)
+                        <div className="space-y-4">
+                            <div className="flex items-center gap-3 p-3 bg-indigo-50 rounded-xl border border-indigo-200">
+                                <i className="fas fa-lightbulb text-indigo-600"></i>
+                                <div className="flex-1">
+                                    <p className="text-[9px] font-black text-indigo-900 uppercase tracking-wider">Sugerido</p>
+                                    <p className="text-xs text-indigo-700 font-medium">{suggestedStrata} estratos (Regla de Sturges)</p>
+                                </div>
+                                <button
+                                    onClick={() => handleChange({ target: { name: 'strataCount', value: suggestedStrata, type: 'number' } } as any)}
+                                    className="px-3 py-1 bg-indigo-600 text-white text-[9px] font-black uppercase rounded-lg hover:bg-indigo-700 transition-all"
+                                >
+                                    Aplicar
+                                </button>
+                            </div>
+                            <input 
+                                type="number" 
+                                name="strataCount" 
+                                value={params.strataCount} 
+                                onChange={handleChange} 
+                                min="2" 
+                                max="10" 
+                                className="w-full text-3xl font-black text-slate-800 border-none p-0 focus:ring-0" 
+                            />
+                            <div className="mt-2 h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+                                <div className="h-full bg-indigo-500 transition-all" style={{ width: `${(params.strataCount / 10) * 100}%` }}></div>
+                            </div>
+                        </div>
+                    )}
                 </div>
+
                 <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-lg border-t-4 border-t-purple-500">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center mb-4">
                         Método Asignación

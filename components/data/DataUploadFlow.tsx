@@ -137,8 +137,8 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
 
             addLog("📊 Estadísticas calculadas.");
 
-            // 1. Crear registro de Población (BACKEND PROXY)
-            addLog("🚀 Enviando población a Netlify Backend...");
+            // 1. Crear registro de Población con retry logic para cold starts
+            addLog("🚀 Enviando población a Backend...");
 
             const popPayload = {
                 file_name: populationName || file.name,
@@ -153,22 +153,67 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                 user_id: user.id
             };
 
-            // Llamada al Backend Function (Vercel)
-            const popRes = await fetch('/api/create_population', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(popPayload)
-            });
+            // Retry logic para manejar cold starts y timeouts
+            let populationId: string | null = null;
+            let createPopRetries = 0;
+            const MAX_CREATE_POP_RETRIES = 3;
 
-            if (!popRes.ok) {
-                const errText = await popRes.text();
-                throw new Error(`Error Backend Población: ${errText}`);
+            while (!populationId && createPopRetries < MAX_CREATE_POP_RETRIES) {
+                try {
+                    if (createPopRetries > 0) {
+                        addLog(`⏳ Reintentando crear población (intento ${createPopRetries + 1}/${MAX_CREATE_POP_RETRIES})...`);
+                    } else {
+                        addLog("⏳ Primera llamada puede tardar 30-60s (cold start del servidor)...");
+                    }
+
+                    // Timeout de 90 segundos para cold start
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 90000);
+
+                    const popRes = await fetch('/api/create_population', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(popPayload),
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (!popRes.ok) {
+                        const errText = await popRes.text();
+                        throw new Error(`Status ${popRes.status}: ${errText}`);
+                    }
+
+                    const popData = await popRes.json();
+                    populationId = popData.id;
+                    addLog(`✅ Población creada en Server (ID: ${populationId})`);
+
+                } catch (popErr: any) {
+                    createPopRetries++;
+                    console.warn(`Create population attempt ${createPopRetries} failed:`, popErr);
+
+                    // Solo mostrar en UI si NO es el último intento (aún hay esperanza)
+                    if (createPopRetries < MAX_CREATE_POP_RETRIES) {
+                        if (popErr.name === 'AbortError') {
+                            addLog(`⏳ Timeout detectado. Reintentando automáticamente...`);
+                        } else {
+                            addLog(`⏳ Reintentando conexión con el servidor...`);
+                        }
+
+                        // Esperar antes de reintentar (backoff exponencial: 2s, 4s, 8s)
+                        const waitTime = 2000 * Math.pow(2, createPopRetries - 1);
+                        addLog(`⏳ Esperando ${waitTime / 1000}s antes de reintentar...`);
+                        await new Promise(resolve => setTimeout(resolve, waitTime));
+                    } else {
+                        // Solo mostrar error si ya agotamos todos los reintentos
+                        throw new Error(`No se pudo crear población tras ${MAX_CREATE_POP_RETRIES} intentos: ${popErr.message}`);
+                    }
+                }
             }
 
-            const popData = await popRes.json();
-            const populationId = popData.id;
-            addLog(`✅ Población creada en Server (ID: ${populationId})`);
-
+            if (!populationId) {
+                throw new Error("No se pudo obtener ID de población");
+            }
             addLog(`⏩ Iniciando carga de ${data.length} filas vía Backend...`);
 
             // 2. Preparar y subir datos por lotes (Batching) - BACKEND PROXY
@@ -400,15 +445,165 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                 )}
 
                 {stage === 'uploading' && (
-                    <div className="p-12 text-center bg-slate-900 text-green-400 rounded-lg font-mono text-sm max-h-96 overflow-y-auto">
-                        <div className="mb-4 text-4xl animate-spin">⚙️</div>
-                        <h3 className="text-xl font-bold text-white mb-2">Procesando...</h3>
-                        <div className="w-full bg-slate-700 rounded-full h-2 mb-4">
-                            <div className="bg-green-500 h-2 rounded-full transition-all" style={{ width: `${uploadProgress}%` }}></div>
+                    <div className="relative min-h-[600px] bg-gradient-to-br from-slate-50 via-white to-slate-50 rounded-3xl overflow-hidden border border-slate-200 shadow-2xl">
+                        {/* Header con icono y título */}
+                        <div className="relative bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 p-8 text-center">
+                            <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMC41IiBvcGFjaXR5PSIwLjEiLz48L3BhdHRlcm4+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9InVybCgjZ3JpZCkiLz48L3N2Zz4=')] opacity-20"></div>
+                            
+                            <div className="relative z-10">
+                                {/* Icono animado */}
+                                <div className="mb-6 flex justify-center">
+                                    <div className="relative">
+                                        <div className="w-24 h-24 bg-white/20 backdrop-blur-sm rounded-3xl flex items-center justify-center shadow-2xl border border-white/30">
+                                            <div className="relative">
+                                                <i className="fas fa-database text-4xl text-white animate-pulse"></i>
+                                                <div className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full animate-ping"></div>
+                                            </div>
+                                        </div>
+                                        {/* Anillos animados */}
+                                        <div className="absolute inset-0 rounded-3xl border-2 border-white/30 animate-ping"></div>
+                                        <div className="absolute inset-0 rounded-3xl border-2 border-white/20 animate-pulse"></div>
+                                    </div>
+                                </div>
+
+                                {/* Título principal */}
+                                <h2 className="text-3xl font-black text-white mb-2 tracking-tight">
+                                    Procesando Población de Auditoría
+                                </h2>
+                                <p className="text-indigo-100 text-sm font-medium">
+                                    {populationName || file?.name || 'Cargando datos...'}
+                                </p>
+                            </div>
                         </div>
-                        <div className="text-left space-y-1">
-                            {logs.map((l, i) => <div key={i}>{l}</div>)}
+
+                        {/* Contenido principal */}
+                        <div className="p-8">
+                            {/* Barra de progreso principal */}
+                            <div className="mb-8">
+                                <div className="flex justify-between items-center mb-3">
+                                    <span className="text-sm font-bold text-slate-600 uppercase tracking-wider">Progreso General</span>
+                                    <span className="text-2xl font-black bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                                        {uploadProgress}%
+                                    </span>
+                                </div>
+                                <div className="relative w-full bg-slate-200 rounded-full h-4 shadow-inner overflow-hidden">
+                                    <div 
+                                        className="absolute inset-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-500 h-full transition-all duration-500 ease-out"
+                                        style={{ width: `${uploadProgress}%` }}
+                                    >
+                                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-40 animate-shimmer"></div>
+                                    </div>
+                                </div>
+                                <p className="text-xs text-slate-500 mt-2 text-center font-medium">
+                                    {uploadProgress < 30 ? 'Validando estructura de datos...' :
+                                     uploadProgress < 60 ? 'Procesando registros...' :
+                                     uploadProgress < 90 ? 'Calculando estadísticas...' :
+                                     'Finalizando carga...'}
+                                </p>
+                            </div>
+
+                            {/* Panel de logs con diseño profesional */}
+                            <div className="bg-slate-900 rounded-2xl p-6 shadow-xl border border-slate-800">
+                                <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+                                        <span className="text-xs font-black text-slate-400 uppercase tracking-widest">
+                                            Registro de Actividad
+                                        </span>
+                                    </div>
+                                    <span className="text-xs text-slate-500 font-mono">
+                                        {logs.length} evento{logs.length !== 1 ? 's' : ''}
+                                    </span>
+                                </div>
+
+                                <div className="max-h-80 overflow-y-auto custom-scrollbar">
+                                    <div className="space-y-2">
+                                        {logs.map((log, i) => {
+                                            const isError = log.includes('❌') || log.includes('ERROR');
+                                            const isSuccess = log.includes('✅') || log.includes('Completada');
+                                            const isWarning = log.includes('⚠️') || log.includes('Reintentando');
+                                            const isInfo = log.includes('📊') || log.includes('🚀') || log.includes('💾');
+                                            
+                                            return (
+                                                <div 
+                                                    key={i} 
+                                                    className={`group flex items-start gap-3 p-3 rounded-xl transition-all duration-300 hover:scale-[1.02] ${
+                                                        isError ? 'bg-red-500/10 border border-red-500/20' :
+                                                        isSuccess ? 'bg-emerald-500/10 border border-emerald-500/20' :
+                                                        isWarning ? 'bg-yellow-500/10 border border-yellow-500/20' :
+                                                        isInfo ? 'bg-blue-500/10 border border-blue-500/20' :
+                                                        'bg-slate-800/50 border border-slate-700/50'
+                                                    }`}
+                                                >
+                                                    {/* Número de línea */}
+                                                    <span className={`flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black ${
+                                                        isError ? 'bg-red-500/20 text-red-400' :
+                                                        isSuccess ? 'bg-emerald-500/20 text-emerald-400' :
+                                                        isWarning ? 'bg-yellow-500/20 text-yellow-400' :
+                                                        isInfo ? 'bg-blue-500/20 text-blue-400' :
+                                                        'bg-slate-700 text-slate-400'
+                                                    }`}>
+                                                        {String(i + 1).padStart(2, '0')}
+                                                    </span>
+                                                    
+                                                    {/* Contenido del log */}
+                                                    <span className={`flex-1 text-sm font-mono leading-relaxed ${
+                                                        isError ? 'text-red-300' :
+                                                        isSuccess ? 'text-emerald-300' :
+                                                        isWarning ? 'text-yellow-300' :
+                                                        isInfo ? 'text-blue-300' :
+                                                        'text-slate-300'
+                                                    }`}>
+                                                        {log}
+                                                    </span>
+
+                                                    {/* Indicador de estado */}
+                                                    {isSuccess && (
+                                                        <i className="fas fa-check-circle text-emerald-400 text-sm animate-bounce"></i>
+                                                    )}
+                                                    {isError && (
+                                                        <i className="fas fa-exclamation-circle text-red-400 text-sm animate-pulse"></i>
+                                                    )}
+                                                    {isWarning && (
+                                                        <i className="fas fa-exclamation-triangle text-yellow-400 text-sm animate-pulse"></i>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Footer con información adicional */}
+                            <div className="mt-6 grid grid-cols-3 gap-4">
+                                <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-100">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <i className="fas fa-clock text-indigo-600 text-sm"></i>
+                                        <span className="text-xs font-bold text-indigo-900 uppercase tracking-wider">Tiempo</span>
+                                    </div>
+                                    <p className="text-sm text-indigo-700 font-medium">Procesando...</p>
+                                </div>
+                                
+                                <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl p-4 border border-emerald-100">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <i className="fas fa-shield-alt text-emerald-600 text-sm"></i>
+                                        <span className="text-xs font-bold text-emerald-900 uppercase tracking-wider">Seguridad</span>
+                                    </div>
+                                    <p className="text-sm text-emerald-700 font-medium">Conexión cifrada</p>
+                                </div>
+                                
+                                <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 border border-purple-100">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <i className="fas fa-database text-purple-600 text-sm"></i>
+                                        <span className="text-xs font-bold text-purple-900 uppercase tracking-wider">Registros</span>
+                                    </div>
+                                    <p className="text-sm text-purple-700 font-medium">{data.length.toLocaleString()}</p>
+                                </div>
+                            </div>
                         </div>
+
+                        {/* Efecto de brillo animado */}
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-indigo-500/5 to-transparent pointer-events-none"></div>
                     </div>
                 )}
 

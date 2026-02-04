@@ -46,6 +46,10 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
     const [selectedAnomalyType, setSelectedAnomalyType] = useState<string | null>(null);
     const [selectedAnomalyTitle, setSelectedAnomalyTitle] = useState<string>('');
 
+    // Estados para vista jerárquica
+    const [expandedRiskLevels, setExpandedRiskLevels] = useState<Set<string>>(new Set(['Alto'])); // Alto expandido por defecto
+    const [expandedAnalysisTypes, setExpandedAnalysisTypes] = useState<Set<string>>(new Set());
+
     const EDA_EXPLANATIONS = useMemo(() => {
         const gapAlerts = appState.selectedPopulation?.risk_profile?.gapAlerts || 0;
         const suggestedN = 30 + (gapAlerts * 5);
@@ -488,7 +492,10 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
             setDetailItems(rows.map(r => ({
                 id: r.unique_id_col,
                 value: r.monetary_value_col ?? 0,
-                raw: typeof r.raw_json === 'string' ? JSON.parse(r.raw_json) : r.raw_json
+                raw: {
+                    ...(typeof r.raw_json === 'string' ? JSON.parse(r.raw_json) : r.raw_json),
+                    risk_factors: r.risk_factors || []
+                }
             })));
 
         } catch (error: any) {
@@ -518,6 +525,118 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
         e.stopPropagation();
         setExplanationContent(EDA_EXPLANATIONS[key]);
         setExplanationOpen(true);
+    };
+
+    // Función para determinar el nivel de riesgo basado en los factores
+    const getRiskLevel = (riskFactors: string[]): 'Alto' | 'Medio' | 'Bajo' => {
+        if (!riskFactors || riskFactors.length === 0) return 'Bajo';
+        
+        // Alto riesgo: 3+ factores o factores críticos
+        const criticalFactors = ['benford', 'outlier', 'duplicado', 'splitting', 'gap', 'isolation', 'ml_anomaly'];
+        const hasCritical = riskFactors.some(f => 
+            criticalFactors.some(cf => f.toLowerCase().includes(cf))
+        );
+        
+        if (riskFactors.length >= 3 || (hasCritical && riskFactors.length >= 2)) {
+            return 'Alto';
+        }
+        
+        // Medio riesgo: 2 factores o 1 factor crítico
+        if (riskFactors.length >= 2 || hasCritical) {
+            return 'Medio';
+        }
+        
+        // Bajo riesgo: 1 factor no crítico
+        return 'Bajo';
+    };
+
+    // Función para extraer el tipo de análisis de los factores de riesgo
+    const getAnalysisType = (riskFactors: string[]): string => {
+        if (!riskFactors || riskFactors.length === 0) return 'Otros';
+        
+        const typeMap: { [key: string]: string } = {
+            'benford': 'Ley de Benford',
+            'enhanced_benford': 'Benford Avanzado',
+            'segundo_digito': 'Benford Avanzado',
+            'outlier': 'Valores Atípicos',
+            'duplicado': 'Duplicados',
+            'redondo': 'Números Redondos',
+            'entropy': 'Entropía Categórica',
+            'categoria': 'Entropía Categórica',
+            'splitting': 'Fraccionamiento',
+            'fraccionamiento': 'Fraccionamiento',
+            'gap': 'Gaps Secuenciales',
+            'secuencial': 'Gaps Secuenciales',
+            'isolation': 'ML Anomalías',
+            'ml_anomaly': 'ML Anomalías',
+            'actor': 'Actores Sospechosos',
+            'usuario_sospechoso': 'Actores Sospechosos'
+        };
+        
+        // Buscar el primer tipo que coincida
+        for (const factor of riskFactors) {
+            const lowerFactor = factor.toLowerCase();
+            for (const [key, value] of Object.entries(typeMap)) {
+                if (lowerFactor.includes(key)) {
+                    return value;
+                }
+            }
+        }
+        
+        return 'Otros';
+    };
+
+    // Organizar items en estructura jerárquica
+    const organizeHierarchically = (items: any[]) => {
+        const hierarchy: {
+            [riskLevel: string]: {
+                [analysisType: string]: any[]
+            }
+        } = {
+            'Alto': {},
+            'Medio': {},
+            'Bajo': {}
+        };
+        
+        items.forEach(item => {
+            const riskFactors = item.raw?.risk_factors || [];
+            const riskLevel = getRiskLevel(riskFactors);
+            const analysisType = getAnalysisType(riskFactors);
+            
+            if (!hierarchy[riskLevel][analysisType]) {
+                hierarchy[riskLevel][analysisType] = [];
+            }
+            
+            hierarchy[riskLevel][analysisType].push(item);
+        });
+        
+        return hierarchy;
+    };
+
+    // Toggle para expandir/colapsar niveles de riesgo
+    const toggleRiskLevel = (level: string) => {
+        setExpandedRiskLevels(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(level)) {
+                newSet.delete(level);
+            } else {
+                newSet.add(level);
+            }
+            return newSet;
+        });
+    };
+
+    // Toggle para expandir/colapsar tipos de análisis
+    const toggleAnalysisType = (key: string) => {
+        setExpandedAnalysisTypes(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(key)) {
+                newSet.delete(key);
+            } else {
+                newSet.add(key);
+            }
+            return newSet;
+        });
     };
 
     return (
@@ -1126,7 +1245,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                             </div>
                         </div>
                         
-                        <div className="max-h-60 overflow-y-auto custom-scrollbar border rounded-2xl">
+                        <div className="max-h-[600px] overflow-y-auto custom-scrollbar border rounded-2xl">
                             {isLoadingDetails ? (
                                 <div className="p-10 text-center">
                                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
@@ -1154,37 +1273,145 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                                     </div>
                                 </div>
                             ) : (
-                                <table className="min-w-full divide-y divide-slate-100">
-                                    <thead className="bg-slate-50">
-                                        <tr>
-                                            <th className="px-4 py-3 text-left text-[10px] font-black text-slate-500 uppercase">ID</th>
-                                            <th className="px-4 py-3 text-right text-[10px] font-black text-slate-500 uppercase">Valor</th>
-                                            <th className="px-4 py-3 text-left text-[10px] font-black text-slate-500 uppercase">Detalles</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-50">
-                                        {detailItems.slice(0, 50).map((item, idx) => (
-                                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                                                <td className="px-4 py-2 text-xs font-mono font-bold text-slate-600">{item.id}</td>
-                                                <td className="px-4 py-2 text-xs text-right font-black text-slate-900">${formatMoney(item.value)}</td>
-                                                <td className="px-4 py-2 text-xs text-slate-500 max-w-xs truncate">
-                                                    {item.raw && typeof item.raw === 'object' ? 
-                                                        Object.entries(item.raw).slice(0, 2).map(([k, v]) => `${k}: ${v}`).join(', ') : 
-                                                        'Sin detalles'
-                                                    }
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                <div className="divide-y divide-slate-100">
+                                    {(() => {
+                                        const hierarchy = organizeHierarchically(detailItems);
+                                        const riskLevelColors = {
+                                            'Alto': { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', icon: 'text-red-500' },
+                                            'Medio': { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-700', icon: 'text-yellow-500' },
+                                            'Bajo': { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700', icon: 'text-green-500' }
+                                        };
+
+                                        return Object.entries(hierarchy).map(([riskLevel, analysisTypes]) => {
+                                            const totalInLevel = Object.values(analysisTypes).reduce((sum, items) => sum + items.length, 0);
+                                            if (totalInLevel === 0) return null;
+
+                                            const colors = riskLevelColors[riskLevel as keyof typeof riskLevelColors];
+                                            const isExpanded = expandedRiskLevels.has(riskLevel);
+
+                                            return (
+                                                <div key={riskLevel} className="bg-white">
+                                                    {/* Nivel 1: Risk Level */}
+                                                    <div
+                                                        onClick={() => toggleRiskLevel(riskLevel)}
+                                                        className={`cursor-pointer p-4 ${colors.bg} border-l-4 ${colors.border} hover:opacity-80 transition-all`}
+                                                    >
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-3">
+                                                                <i className={`fas ${isExpanded ? 'fa-chevron-down' : 'fa-chevron-right'} ${colors.icon} text-sm`}></i>
+                                                                <div className="flex items-center gap-2">
+                                                                    <i className={`fas fa-exclamation-triangle ${colors.icon}`}></i>
+                                                                    <span className={`font-black text-sm uppercase tracking-wider ${colors.text}`}>
+                                                                        Riesgo {riskLevel}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex items-center gap-4">
+                                                                <span className={`text-xs font-bold ${colors.text}`}>
+                                                                    {totalInLevel} registro{totalInLevel !== 1 ? 's' : ''}
+                                                                </span>
+                                                                <span className={`px-2 py-1 ${colors.bg} ${colors.border} border rounded-full text-[10px] font-black ${colors.text}`}>
+                                                                    {Object.keys(analysisTypes).length} tipo{Object.keys(analysisTypes).length !== 1 ? 's' : ''}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Nivel 2: Analysis Types */}
+                                                    {isExpanded && (
+                                                        <div className="bg-slate-50">
+                                                            {Object.entries(analysisTypes).map(([analysisType, items]) => {
+                                                                if (items.length === 0) return null;
+                                                                
+                                                                const typeKey = `${riskLevel}-${analysisType}`;
+                                                                const isTypeExpanded = expandedAnalysisTypes.has(typeKey);
+
+                                                                return (
+                                                                    <div key={typeKey} className="border-b border-slate-100 last:border-b-0">
+                                                                        {/* Nivel 2: Analysis Type Header */}
+                                                                        <div
+                                                                            onClick={() => toggleAnalysisType(typeKey)}
+                                                                            className="cursor-pointer p-3 pl-12 hover:bg-slate-100 transition-all"
+                                                                        >
+                                                                            <div className="flex items-center justify-between">
+                                                                                <div className="flex items-center gap-3">
+                                                                                    <i className={`fas ${isTypeExpanded ? 'fa-chevron-down' : 'fa-chevron-right'} text-slate-400 text-xs`}></i>
+                                                                                    <span className="font-bold text-xs text-slate-700">
+                                                                                        {analysisType}
+                                                                                    </span>
+                                                                                </div>
+                                                                                <span className="text-[10px] font-bold text-slate-500 bg-white px-2 py-1 rounded-full border border-slate-200">
+                                                                                    {items.length} item{items.length !== 1 ? 's' : ''}
+                                                                                </span>
+                                                                            </div>
+                                                                        </div>
+
+                                                                        {/* Nivel 3: Items Table */}
+                                                                        {isTypeExpanded && (
+                                                                            <div className="pl-12 pr-4 pb-3">
+                                                                                <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+                                                                                    <table className="min-w-full divide-y divide-slate-100">
+                                                                                        <thead className="bg-slate-50">
+                                                                                            <tr>
+                                                                                                <th className="px-3 py-2 text-left text-[9px] font-black text-slate-500 uppercase">ID</th>
+                                                                                                <th className="px-3 py-2 text-right text-[9px] font-black text-slate-500 uppercase">Valor</th>
+                                                                                                <th className="px-3 py-2 text-left text-[9px] font-black text-slate-500 uppercase">Factores de Riesgo</th>
+                                                                                            </tr>
+                                                                                        </thead>
+                                                                                        <tbody className="divide-y divide-slate-50">
+                                                                                            {items.slice(0, 20).map((item, idx) => (
+                                                                                                <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                                                                                    <td className="px-3 py-2 text-[10px] font-mono font-bold text-slate-600">
+                                                                                                        {item.id}
+                                                                                                    </td>
+                                                                                                    <td className="px-3 py-2 text-[10px] text-right font-black text-slate-900">
+                                                                                                        ${formatMoney(item.value)}
+                                                                                                    </td>
+                                                                                                    <td className="px-3 py-2 text-[10px] text-slate-500">
+                                                                                                        {item.raw?.risk_factors && Array.isArray(item.raw.risk_factors) ? (
+                                                                                                            <div className="flex flex-wrap gap-1">
+                                                                                                                {item.raw.risk_factors.map((factor: string, i: number) => (
+                                                                                                                    <span key={i} className="px-2 py-0.5 bg-slate-100 text-[9px] font-medium rounded-full border border-slate-200">
+                                                                                                                        {factor}
+                                                                                                                    </span>
+                                                                                                                ))}
+                                                                                                            </div>
+                                                                                                        ) : (
+                                                                                                            <span className="text-slate-400 italic">Sin factores</span>
+                                                                                                        )}
+                                                                                                    </td>
+                                                                                                </tr>
+                                                                                            ))}
+                                                                                        </tbody>
+                                                                                    </table>
+                                                                                    {items.length > 20 && (
+                                                                                        <div className="bg-slate-50 px-3 py-2 text-center border-t border-slate-200">
+                                                                                            <p className="text-[9px] text-slate-500 font-medium">
+                                                                                                Mostrando 20 de {items.length} registros. Use "Exportar" para ver todos.
+                                                                                            </p>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        });
+                                    })()}
+                                </div>
                             )}
                         </div>
                         
-                        {detailItems.length > 50 && (
-                            <div className="text-center p-2 bg-amber-50 rounded-lg border border-amber-200">
-                                <p className="text-xs text-amber-800 font-medium">
+                        {detailItems.length > 0 && detailItems[0]?.id !== 'ERROR' && (
+                            <div className="text-center p-2 bg-blue-50 rounded-lg border border-blue-200">
+                                <p className="text-xs text-blue-800 font-medium">
                                     <i className="fas fa-info-circle mr-1"></i>
-                                    Mostrando los primeros 50 de {detailItems.length} registros. Use "Exportar" para ver todos.
+                                    Vista jerárquica: Expandir/colapsar niveles para explorar los hallazgos por riesgo y tipo de análisis
                                 </p>
                             </div>
                         )}
@@ -1590,6 +1817,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         population={appState.selectedPopulation}
                         analysis={forensicResults}
                         onClose={() => setForensicResultsOpen(false)}
+                        riskChartData={undefined} // NonStatistical no tiene gráfico de riesgos tradicional
                     />
                 )}
 

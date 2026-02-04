@@ -14,7 +14,6 @@ import SampleHistoryManager from './SampleHistoryManager';
 import { useToast } from '../ui/ToastContext';
 import StratumAllocationPreview from './StratumAllocationPreview';
 import { samplingProxyFetch, FetchTimeoutError, FetchNetworkError } from '../../services/fetchUtils';
-import { saveSample } from '../../services/sampleStorageService';
 
 interface Props {
     appState: AppState;
@@ -298,10 +297,16 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                     
                     // ✅ FIX CRÍTICO: Usar samplingProxyFetch en lugar de saveSample
                     const savedSample = await samplingProxyFetch('save_sample', {
-                        population_id: historicalData.population_id,
-                        method: historicalData.method,
-                        sample_data: historicalData,
-                        is_final: historicalData.is_final
+                        population_id: appState.selectedPopulation.id,
+                        method: appState.samplingMethod,
+                        sample_data: {
+                            objective: appState.generalParams.objective,
+                            seed: appState.generalParams.seed,
+                            sample_size: results.sampleSize,
+                            params_snapshot: appState.samplingParams,
+                            results_snapshot: results
+                        },
+                        is_final: true
                     });
                     
                     console.log(`✅ Guardado completado exitosamente:`, savedSample);

@@ -298,7 +298,7 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                     // ✅ FIX CRÍTICO: Usar samplingProxyFetch con manejo robusto de errores
                     let savedSample;
                     try {
-                        savedSample = await samplingProxyFetch('save_sample', {
+                        const saveData = {
                             population_id: appState.selectedPopulation.id,
                             method: appState.samplingMethod,
                             sample_data: {
@@ -309,13 +309,55 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                                 results_snapshot: results
                             },
                             is_final: true
+                        };
+                        
+                        console.log("📤 Datos a guardar:", {
+                            population_id: saveData.population_id,
+                            method: saveData.method,
+                            is_final: saveData.is_final,
+                            sample_size: saveData.sample_data.sample_size,
+                            objective: saveData.sample_data.objective.substring(0, 50) + '...'
                         });
+                        
+                        savedSample = await samplingProxyFetch('save_sample', saveData);
                         
                         console.log(`✅ Guardado completado exitosamente:`, savedSample);
                         
                         // Verificar que la respuesta sea válida
                         if (!savedSample || !savedSample.id) {
                             throw new Error('Respuesta inválida del servidor: falta ID de muestra');
+                        }
+                        
+                        // 🔍 VERIFICACIÓN ADICIONAL: Confirmar que se guardó en la BD
+                        console.log("🔍 Verificando persistencia en BD...");
+                        try {
+                            // Esperar un momento para que se propague
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                            
+                            const historyCheck = await samplingProxyFetch('get_history', {
+                                population_id: appState.selectedPopulation.id
+                            });
+                            
+                            const foundSample = historyCheck.history?.find(h => h.id === savedSample.id);
+                            
+                            if (foundSample) {
+                                console.log("✅ PERSISTENCIA CONFIRMADA: Muestra encontrada en historial");
+                                console.log("📄 Detalles:", {
+                                    id: foundSample.id,
+                                    is_current: foundSample.is_current,
+                                    is_final: foundSample.is_final,
+                                    created_at: foundSample.created_at
+                                });
+                            } else {
+                                console.warn("⚠️ ADVERTENCIA: Muestra no encontrada en historial inmediatamente");
+                                console.warn("💡 Esto puede ser normal debido a propagación de BD");
+                                
+                                // Marcar como temporal si no se encuentra
+                                savedSample.persistence_warning = true;
+                            }
+                        } catch (verifyError) {
+                            console.warn("⚠️ No se pudo verificar persistencia:", verifyError.message);
+                            savedSample.persistence_warning = true;
                         }
                         
                     } catch (saveError) {
@@ -347,7 +389,8 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                             savedSample = {
                                 id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                                 created_at: new Date().toISOString(),
-                                method: 'memory_only'
+                                method: 'memory_only',
+                                persistence_warning: true
                             };
                         } else {
                             // Error crítico, no continuar
@@ -382,9 +425,13 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                     
                     console.log("✅ Estado actualizado correctamente");
                     
-                    // Mensaje de éxito apropiado
+                    // Mensaje de éxito apropiado basado en persistencia real
                     if (savedSample && savedSample.id && !savedSample.id.startsWith('temp-')) {
-                        addToast("✅ Muestra bloqueada exitosamente como Papel de Trabajo", "success");
+                        if (savedSample.persistence_warning) {
+                            addToast("✅ Muestra bloqueada exitosamente (verificando persistencia en BD...)", "info");
+                        } else {
+                            addToast("✅ Muestra bloqueada exitosamente como Papel de Trabajo", "success");
+                        }
                     } else {
                         addToast("✅ Muestra generada (guardada en memoria temporal)", "info");
                     }

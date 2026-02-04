@@ -129,9 +129,6 @@ const CAVResultsView: React.FC<Props> = ({ appState, setAppState, role, onBack }
         setIsExpanding(true);
         try {
             const amountToFetch = expansionMetrics.recommendedExpansion;
-            const existingIds = currentResults.sample.map(i => i.id);
-
-            const amountToFetch = expansionMetrics.recommendedExpansion;
             const existingIds = new Set(currentResults.sample.map(i => i.id));
 
             // Strategy: Re-fetch universe (lightweight) -> Filter -> Hydrate (Bypass Firewall)

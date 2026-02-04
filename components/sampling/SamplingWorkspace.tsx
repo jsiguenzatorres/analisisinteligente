@@ -52,13 +52,22 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
     const { addToast } = useToast();
 
     const checkExistingAndLock = async () => {
-        if (!appState.selectedPopulation) return;
+        console.log("🔐 checkExistingAndLock iniciado", { selectedPopulation: !!appState.selectedPopulation, loading });
+        
+        if (!appState.selectedPopulation) {
+            console.error("❌ No hay población seleccionada en checkExistingAndLock");
+            return;
+        }
+        
+        console.log("✅ Iniciando verificación y bloqueo...");
         setLoading(true);
 
         try {
             // 🚨 BYPASS TEMPORAL: Saltar verificación de historial para evitar cuelgues
             console.log("⚠️ BYPASS: Saltando verificación de historial para evitar cuelgues");
+            console.log("🎯 Llamando handleRunSampling(true)...");
             await handleRunSampling(true);
+            console.log("✅ handleRunSampling completado");
             return;
 
             // CÓDIGO ORIGINAL COMENTADO TEMPORALMENTE
@@ -105,7 +114,12 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
     };
 
     const handleRunSampling = async (isFinal: boolean, manualAllocations?: Record<string, number>) => {
-        if (!appState.selectedPopulation) return;
+        console.log("🚀 handleRunSampling iniciado", { isFinal, loading, selectedPopulation: !!appState.selectedPopulation });
+        
+        if (!appState.selectedPopulation) {
+            console.error("❌ No hay población seleccionada");
+            return;
+        }
         
         // 🔒 PROTECCIÓN CRÍTICA: Evitar múltiples ejecuciones
         if (loading) {
@@ -113,6 +127,7 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
             return;
         }
         
+        console.log("✅ Iniciando proceso de muestreo...");
         setLoading(true);
         setShowConfirmModal(false);
         setShowReplaceWarning(false);
@@ -342,7 +357,9 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
             
             // 🔧 FIX: setLoading(false) ANTES de onComplete() para evitar botón pegado
             setLoading(false);
+            console.log("🎯 Llamando onComplete()...");
             onComplete();
+            console.log("✅ onComplete() ejecutado exitosamente");
             
         } catch (error) {
             console.error("Error en flujo de muestreo:", error);

@@ -757,6 +757,20 @@ const onLoadHistory = (sample: HistoricalSample) => {
                             </div>
                         </button>
                     </div>
+
+                    {/* Botón ENTENDIDO para cerrar el modal */}
+                    <div className="pt-4 border-t border-slate-200">
+                        <button
+                            onClick={() => setShowConfirmModal(false)}
+                            className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-800 rounded-xl font-medium text-sm transition-all flex items-center justify-center gap-2"
+                        >
+                            <i className="fas fa-check text-green-500"></i>
+                            ENTENDIDO
+                        </button>
+                        <p className="text-xs text-slate-400 text-center mt-2">
+                            Puede cerrar este modal y continuar configurando parámetros
+                        </p>
+                    </div>
                 </div>
             </Modal>
 

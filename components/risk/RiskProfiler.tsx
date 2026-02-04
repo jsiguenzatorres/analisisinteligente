@@ -582,7 +582,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
         
         // Configurar sincronización offline si es móvil
         if (isMobile) {
-            const syncId = offlineSync.onSyncStatus('risk-analysis', (status) => {
+            offlineSync.onSyncStatus('risk-analysis', (status) => {
                 setOfflineStatus(status);
                 if (status.status === 'success') {
                     addToast('Datos sincronizados correctamente', 'success');
@@ -590,10 +590,6 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                     addToast('Error en sincronización - datos guardados offline', 'warning');
                 }
             });
-
-            return () => {
-                offlineSync.offSyncStatus(syncId);
-            };
         }
     }, []);
 

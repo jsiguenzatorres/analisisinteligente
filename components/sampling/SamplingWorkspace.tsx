@@ -295,21 +295,65 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
 
                     console.log("🔄 Guardando muestra con estrategia híbrida...");
                     
-                    // ✅ FIX CRÍTICO: Usar samplingProxyFetch en lugar de saveSample
-                    const savedSample = await samplingProxyFetch('save_sample', {
-                        population_id: appState.selectedPopulation.id,
-                        method: appState.samplingMethod,
-                        sample_data: {
-                            objective: appState.generalParams.objective,
-                            seed: appState.generalParams.seed,
-                            sample_size: results.sampleSize,
-                            params_snapshot: appState.samplingParams,
-                            results_snapshot: results
-                        },
-                        is_final: true
-                    });
-                    
-                    console.log(`✅ Guardado completado exitosamente:`, savedSample);
+                    // ✅ FIX CRÍTICO: Usar samplingProxyFetch con manejo robusto de errores
+                    let savedSample;
+                    try {
+                        savedSample = await samplingProxyFetch('save_sample', {
+                            population_id: appState.selectedPopulation.id,
+                            method: appState.samplingMethod,
+                            sample_data: {
+                                objective: appState.generalParams.objective,
+                                seed: appState.generalParams.seed,
+                                sample_size: results.sampleSize,
+                                params_snapshot: appState.samplingParams,
+                                results_snapshot: results
+                            },
+                            is_final: true
+                        });
+                        
+                        console.log(`✅ Guardado completado exitosamente:`, savedSample);
+                        
+                        // Verificar que la respuesta sea válida
+                        if (!savedSample || !savedSample.id) {
+                            throw new Error('Respuesta inválida del servidor: falta ID de muestra');
+                        }
+                        
+                    } catch (saveError) {
+                        console.error("❌ Error detallado en guardado:", saveError);
+                        
+                        // Análisis específico del error para mejor diagnóstico
+                        let errorMessage = "Error al guardar la muestra";
+                        let shouldContinue = false;
+                        
+                        if (saveError.message?.includes('RLS') || saveError.message?.includes('permission')) {
+                            errorMessage = "Error de permisos en base de datos. La muestra se guardará solo en memoria.";
+                            shouldContinue = true;
+                        } else if (saveError.message?.includes('timeout')) {
+                            errorMessage = "Timeout al guardar. La muestra se guardará solo en memoria.";
+                            shouldContinue = true;
+                        } else if (saveError.message?.includes('network') || saveError.message?.includes('fetch')) {
+                            errorMessage = "Error de conexión. La muestra se guardará solo en memoria.";
+                            shouldContinue = true;
+                        } else if (saveError.message?.includes('Missing required fields')) {
+                            errorMessage = "Error de datos: campos requeridos faltantes";
+                            shouldContinue = false;
+                        }
+                        
+                        if (shouldContinue) {
+                            console.log("⚠️ Continuando sin guardado en BD debido a:", saveError.message);
+                            addToast(errorMessage, "warning");
+                            
+                            // Crear un ID temporal para continuar
+                            savedSample = {
+                                id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                                created_at: new Date().toISOString(),
+                                method: 'memory_only'
+                            };
+                        } else {
+                            // Error crítico, no continuar
+                            throw new Error(`Error crítico en guardado: ${saveError.message}`);
+                        }
+                    }
 
                     setAppState(prev => {
                         const currentMethodResults = {
@@ -317,12 +361,17 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                             method: prev.samplingMethod,
                             sampling_params: prev.samplingParams
                         };
+                        
+                        // Determinar si está bloqueado basado en si se guardó exitosamente
+                        const isLocked = savedSample && savedSample.id && !savedSample.id.startsWith('temp-');
+                        const isCurrentVersion = isLocked;
+                        
                         return {
                             ...prev,
                             results,
-                            isLocked: true,
-                            isCurrentVersion: true,
-                            historyId: savedSample.id || savedSample.sample_id,
+                            isLocked,
+                            isCurrentVersion,
+                            historyId: savedSample?.id,
                             full_results_storage: {
                                 ...(prev.full_results_storage || {}),
                                 [prev.samplingMethod]: currentMethodResults,
@@ -332,7 +381,13 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                     });
                     
                     console.log("✅ Estado actualizado correctamente");
-                    addToast("✅ Muestra generada exitosamente (guardada en memoria)", "success");
+                    
+                    // Mensaje de éxito apropiado
+                    if (savedSample && savedSample.id && !savedSample.id.startsWith('temp-')) {
+                        addToast("✅ Muestra bloqueada exitosamente como Papel de Trabajo", "success");
+                    } else {
+                        addToast("✅ Muestra generada (guardada en memoria temporal)", "info");
+                    }
                 } catch (saveError) {
                     console.error("❌ Error al guardar:", saveError);
                     

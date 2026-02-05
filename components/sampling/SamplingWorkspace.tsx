@@ -360,6 +360,24 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                             savedSample.persistence_warning = true;
                         }
                         
+                        // 🚨 DETECCIÓN AUTOMÁTICA DE PROBLEMA RLS
+                        if (savedSample.persistence_warning || !foundSample) {
+                            console.log("🚨 DETECTADO: Posible problema RLS en audit_historical_samples");
+                            console.log("💡 ACTIVANDO MODO DE EMERGENCIA AUTOMÁTICO...");
+                            
+                            // Activar modo emergencia automáticamente
+                            localStorage.setItem('SKIP_SAVE_MODE', 'true');
+                            localStorage.setItem('EMERGENCY_REASON', 'RLS_AUTO_DETECTED');
+                            localStorage.setItem('EMERGENCY_TIMESTAMP', Date.now().toString());
+                            
+                            console.log("✅ Modo emergencia activado - próximas muestras se guardarán solo en memoria");
+                            
+                            // Mostrar instrucciones al usuario
+                            if (window.addToast) {
+                                addToast("⚠️ Problema de BD detectado. Contacte al administrador. Modo emergencia activado.", "warning");
+                            }
+                        }
+                        
                     } catch (saveError) {
                         console.error("❌ Error detallado en guardado:", saveError);
                         

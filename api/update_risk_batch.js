@@ -43,7 +43,7 @@ export default async function handler(req, res) {
         const invalidUpdates = updates.filter(update => !update.id || typeof update.id !== 'string');
         if (invalidUpdates.length > 0) {
             console.error('Invalid update structure:', invalidUpdates.slice(0, 3));
-            return res.status(400).json({ 
+            return res.status(400).json({
                 error: 'Invalid update structure - missing id field',
                 sample: invalidUpdates.slice(0, 3)
             });
@@ -56,32 +56,39 @@ export default async function handler(req, res) {
 
         for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
             const chunk = updates.slice(i, i + CHUNK_SIZE);
-            
+
             try {
-                console.log(`Processing chunk ${Math.floor(i/CHUNK_SIZE) + 1}/${Math.ceil(updates.length/CHUNK_SIZE)} (${chunk.length} items)`);
-                
+                console.log(`Processing chunk ${Math.floor(i / CHUNK_SIZE) + 1}/${Math.ceil(updates.length / CHUNK_SIZE)} (${chunk.length} items)`);
+
+                // Mapear de vuelta a la estructura de la tabla usando unique_id_col
+                const mappedChunk = chunk.map(item => ({
+                    unique_id_col: item.id,      // 'id' viene del frontend, pero la columna se llama unique_id_col
+                    risk_score: item.risk_score,
+                    risk_factors: item.risk_factors
+                }));
+
                 const { error, count } = await supabase
                     .from('audit_data_rows')
-                    .upsert(chunk, { 
-                        onConflict: 'id',
+                    .upsert(mappedChunk, {
+                        onConflict: 'unique_id_col',  // PK real de la tabla
                         count: 'exact'
                     });
 
                 if (error) {
                     console.error('Batch upsert error:', error);
                     errors.push({
-                        chunk: Math.floor(i/CHUNK_SIZE) + 1,
+                        chunk: Math.floor(i / CHUNK_SIZE) + 1,
                         error: error.message,
                         details: error.details
                     });
                 } else {
                     processedCount += count || chunk.length;
-                    console.log(`Chunk ${Math.floor(i/CHUNK_SIZE) + 1} processed successfully: ${count || chunk.length} rows`);
+                    console.log(`Chunk ${Math.floor(i / CHUNK_SIZE) + 1} processed successfully: ${count || chunk.length} rows`);
                 }
             } catch (chunkError) {
                 console.error('Chunk processing error:', chunkError);
                 errors.push({
-                    chunk: Math.floor(i/CHUNK_SIZE) + 1,
+                    chunk: Math.floor(i / CHUNK_SIZE) + 1,
                     error: chunkError.message
                 });
             }
@@ -94,9 +101,9 @@ export default async function handler(req, res) {
 
         if (errors.length > 0) {
             console.error('Processing completed with errors:', errors);
-            return res.status(207).json({ 
-                success: false, 
-                error: 'Partial processing error', 
+            return res.status(207).json({
+                success: false,
+                error: 'Partial processing error',
                 details: errors,
                 processedCount,
                 totalCount: updates.length
@@ -104,15 +111,15 @@ export default async function handler(req, res) {
         }
 
         console.log(`Successfully processed ${processedCount} risk updates`);
-        return res.status(200).json({ 
-            success: true, 
+        return res.status(200).json({
+            success: true,
             count: processedCount,
-            totalChunks: Math.ceil(updates.length/CHUNK_SIZE)
+            totalChunks: Math.ceil(updates.length / CHUNK_SIZE)
         });
 
     } catch (error) {
         console.error('[Update Risk Batch Error]', error);
-        return res.status(500).json({ 
+        return res.status(500).json({
             error: error.message,
             timestamp: new Date().toISOString()
         });

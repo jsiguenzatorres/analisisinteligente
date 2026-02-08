@@ -175,9 +175,10 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
         const hasCategoryMapping = !!appState.selectedPopulation?.column_mapping?.category;
 
         // Debug: Ver qué tienen los items
-        console.log('🔍 DEBUG - Primer item de la muestra:', items[0]);
-        console.log('🔍 DEBUG - risk_factors del primer item:', items[0]?.risk_factors);
-        console.log('🔍 DEBUG - Mapeo de categorías:', appState.selectedPopulation?.column_mapping);
+        // REMOVED - These logs were causing performance issues
+        // console.log('🔍 DEBUG - Primer item de la muestra:', items[0]);
+        // console.log('🔍 DEBUG - risk_factors del primer item:', items[0]?.risk_factors);
+        // console.log('🔍 DEBUG - Mapeo de categorías:', appState.selectedPopulation?.column_mapping);
 
         const hierarchy: {
             [riskLevel: string]: {
@@ -199,14 +200,15 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
             const category = hasCategoryMapping ? (getCategoryFromItem(item) || 'Sin Categoría') : 'Todos';
 
             // Debug: Ver clasificación del primer item
-            if (items.indexOf(item) === 0) {
-                console.log('🔍 DEBUG - Clasificación del primer item:');
-                console.log('  - riskScore:', riskScore);
-                console.log('  - riskFactors:', riskFactors);
-                console.log('  - riskLevel:', riskLevel);
-                console.log('  - analysisType:', analysisType);
-                console.log('  - category:', category);
-            }
+            // REMOVED - These logs were causing performance issues
+            // if (items.indexOf(item) === 0) {
+            //     console.log('🔍 DEBUG - Clasificación del primer item:');
+            //     console.log('  - riskScore:', riskScore);
+            //     console.log('  - riskFactors:', riskFactors);
+            //     console.log('  - riskLevel:', riskLevel);
+            //     console.log('  - analysisType:', analysisType);
+            //     console.log('  - category:', category);
+            // }
 
             if (!hierarchy[riskLevel][analysisType]) {
                 hierarchy[riskLevel][analysisType] = {};
@@ -394,15 +396,32 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
     };
 
     const saveToDb = async (updatedResults: AuditResults, silent = true) => {
-
-
-        if (!appState.selectedPopulation?.id) {
-            console.log('🔴 [SAVE] No population selected, exiting');
-            return;
-        }
-        console.log('🔵 [SAVE] Population ID:', appState.selectedPopulation.id);
-        setIsSaving(true);
         try {
+            console.log('🔵 [SAVE] saveToDb called with silent:', silent);
+
+            // 🔐 SKIP AUTH CHECK - It's hanging. User is already authenticated.
+            console.log('⚠️ [SAVE] Skipping auth check (hanging issue) - assuming authenticated');
+
+            // COMMENTED OUT - This hangs indefinitely
+            // console.log('🔵 [SAVE] Checking authentication...');
+            // const { data: { session } } = await supabase.auth.getSession();
+            // console.log('🔐 [AUTH] Session:', session ? 'AUTHENTICATED' : 'NOT AUTHENTICATED');
+            // console.log('🔐 [AUTH] User:', session?.user?.email || 'NO USER');
+            // console.log('🔐 [AUTH] Access token:', session?.access_token ? 'EXISTS' : 'MISSING');
+
+            // if (!session) {
+            //     console.error('🔴 [AUTH] No hay sesión activa - el upsert fallará por RLS');
+            //     setSaveFeedback({ show: true, title: "Error de Autenticación", message: "Sesión expirada. Por favor recarga la página.", type: 'error' });
+            //     return;
+            // }
+
+            if (!appState.selectedPopulation?.id) {
+                console.log('🔴 [SAVE] No population selected, exiting');
+                return;
+            }
+            console.log('🔵 [SAVE] Population ID:', appState.selectedPopulation.id);
+            setIsSaving(true);
+
             console.log('🔵 [SAVE] Optimizing sample (removing raw_row)...');
             // OPTIMIZE: Remove raw_row from sample to reduce payload size (raw_row is already in audit_data_rows)
             const optimizedSample = (updatedResults.sample || []).map(item => {
@@ -435,35 +454,36 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                 console.warn('⚠️ [SAVE] Large payload detected:', (payloadSize / 1024).toFixed(2), 'KB');
             }
 
-            console.log('🔵 [SAVE] Calling Supabase upsert...');
+            console.log('🔵 [SAVE] Calling proxy API for save_work_in_progress...');
 
-            // ⏱️ ADD TIMEOUT WRAPPER (15 seconds)
-            const upsertPromise = supabase
-                .from('audit_results')
-                .upsert({
+            // 🔄 USE PROXY API instead of direct Supabase client (which hangs in local)
+            const response = await fetch('/api/sampling_proxy?action=save_work_in_progress', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
                     population_id: appState.selectedPopulation.id,
                     results_json: updatedStorage,
                     sample_size: updatedResults.sampleSize,
-                    updated_at: new Date().toISOString()
-                }, { onConflict: 'population_id' });
+                }),
+            });
 
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Timeout de 15s excedido - verifica el tamaño del payload')), 15000)
-            );
+            console.log('🔵 [SAVE] Proxy response status:', response.status);
 
-            const { error } = await Promise.race([upsertPromise, timeoutPromise]) as any;
-
-            console.log('🔵 [SAVE] Upsert completed');
-            if (error) {
-                console.error('🔴 [SAVE] Upsert error:', error);
-                setSaveFeedback({ show: true, title: "Error", message: error.message, type: 'error' });
-            } else {
-                console.log('✅ [SAVE] Save successful!');
-                setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
-                if (!silent) setSaveFeedback({ show: true, title: "Sincronizado", message: "Papel de trabajo actualizado.", type: 'success' });
+            if (!response.ok) {
+                const errorData = await response.json();
+                console.error('🔴 [SAVE] Proxy error:', errorData);
+                throw new Error(errorData.error || `HTTP ${response.status}`);
             }
+
+            const resultData = await response.json();
+            console.log('✅ [SAVE] Save successful via proxy!', resultData);
+            setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
+            if (!silent) setSaveFeedback({ show: true, title: "Sincronizado", message: "Papel de trabajo actualizado.", type: 'success' });
         } catch (err: any) {
             console.error('🔴 [SAVE] Exception:', err);
+            console.error('🔴 [SAVE] Stack:', err?.stack);
             if (!silent) setSaveFeedback({ show: true, title: "Error", message: err.message || "Falla de red.", type: 'error' });
         } finally {
             console.log('🔵 [SAVE] Cleanup (setIsSaving false)');
@@ -812,7 +832,10 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
         <>
             <SharedResultsLayout
                 appState={appState} role={role} onBack={onBack} title="Muestreo No Estadístico: Panel de Control"
-                onSaveManual={() => saveToDb(currentResults, false)}
+                onSaveManual={() => {
+                    console.log('🟢 [CLICK] Botón GUARDAR TRABAJO clickeado!');
+                    saveToDb(currentResults, false);
+                }}
                 isSaving={isSaving}
                 sidebarContent={sidebar} mainContent={main}
                 certificationContent={

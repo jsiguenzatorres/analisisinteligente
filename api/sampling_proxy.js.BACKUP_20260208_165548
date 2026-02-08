@@ -217,18 +217,6 @@ export default async function handler(req, res) {
                 const { population_id, method, sample_data, is_final } = req.body;
                 if (!population_id || !method || !sample_data) return res.status(400).json({ error: 'Missing required fields' });
 
-                // 🔒 RLS: Obtener user_id de la población para asociar la muestra
-                const { data: population, error: popError } = await supabase
-                    .from('audit_populations')
-                    .select('user_id')
-                    .eq('id', population_id)
-                    .single();
-
-                if (popError) {
-                    console.error('Error fetching population user_id:', popError);
-                    throw new Error('Population not found or inaccessible');
-                }
-
                 if (is_final) {
                     await supabase
                         .from('audit_historical_samples')
@@ -240,7 +228,6 @@ export default async function handler(req, res) {
                 const payload = {
                     population_id,
                     method,
-                    user_id: population?.user_id, // 🔒 RLS: Incluir user_id
                     objective: sample_data.objective,
                     seed: sample_data.seed,
                     sample_size: sample_data.sample_size,
@@ -271,23 +258,10 @@ export default async function handler(req, res) {
                 }
 
                 try {
-                    // 🔒 RLS: Obtener user_id de la población
-                    const { data: population, error: popError } = await supabase
-                        .from('audit_populations')
-                        .select('user_id')
-                        .eq('id', population_id)
-                        .single();
-
-                    if (popError) {
-                        console.error('Error fetching population user_id:', popError);
-                        throw new Error('Population not found or inaccessible');
-                    }
-
                     const { data, error } = await supabase
                         .from('audit_results')
                         .upsert({
                             population_id,
-                            user_id: population?.user_id, // 🔒 RLS: Incluir user_id
                             results_json,
                             sample_size,
                             updated_at: new Date().toISOString()

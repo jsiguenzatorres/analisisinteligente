@@ -13,6 +13,7 @@ import { useMobileOptimization } from '../../services/mobileOptimizationService'
 import { useOfflineSync } from '../../services/offlineSyncService';
 import { useMobileReports } from '../../services/mobileReportService';
 import MobileRiskChart from '../mobile/MobileRiskChart';
+import html2canvas from 'html2canvas';
 
 interface Props {
     population: AuditPopulation;
@@ -34,18 +35,18 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
         low: true
     });
     const [isGeneratingReport, setIsGeneratingReport] = useState(false);
-    
+
     // Estados para optimizaciones de rendimiento
     const [lazyLoadState, setLazyLoadState] = useState<LazyLoadState | null>(null);
     const [backgroundTasks, setBackgroundTasks] = useState<string[]>([]);
     const [showProgressNotification, setShowProgressNotification] = useState(false);
     const [progressMessage, setProgressMessage] = useState('');
     const [isUsingCache, setIsUsingCache] = useState(false);
-    
+
     // Estados para optimizaciones móviles
     const [showMobilePreview, setShowMobilePreview] = useState(false);
     const [offlineStatus, setOfflineStatus] = useState<any>(null);
-    
+
     const { addToast } = useToast();
     const cache = useAnalysisCache();
     const lazyLoader = useLazyLoading();
@@ -57,23 +58,23 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
     // Función para obtener información detallada de un punto
     const getPointDetails = (point: any) => {
         if (!point || !analysisData) return null;
-        
+
         return {
             id: point.name || point.id,
             score: point.y?.toFixed(1) || '0.0',
             alerts: point.x || 0,
-            value: point.value?.toLocaleString('es-ES', { 
-                style: 'currency', 
-                currency: 'USD' 
+            value: point.value?.toLocaleString('es-ES', {
+                style: 'currency',
+                currency: 'USD'
             }) || '$0',
             riskLevel: point.y > 75 ? 'ALTO' : point.y > 40 ? 'MEDIO' : 'BAJO',
             riskColor: point.y > 75 ? '#f43f5e' : point.y > 40 ? '#f59e0b' : '#10b981',
             // Simular factores de riesgo basados en el score
-            riskFactors: point.y > 75 ? 
+            riskFactors: point.y > 75 ?
                 ['Valor atípico detectado', 'Patrón Benford anómalo', 'Proveedor sospechoso'] :
                 point.y > 40 ?
-                ['Valor moderadamente alto', 'Requiere revisión'] :
-                ['Transacción normal', 'Sin anomalías detectadas']
+                    ['Valor moderadamente alto', 'Requiere revisión'] :
+                    ['Transacción normal', 'Sin anomalías detectadas']
         };
     };
 
@@ -82,13 +83,13 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
         if (active && payload && payload.length) {
             const data = payload[0].payload;
             const details = getPointDetails(data);
-            
+
             if (!details) return null;
 
             return (
                 <div className="bg-white p-4 rounded-xl shadow-2xl border border-slate-200 min-w-[280px]">
                     <div className="flex items-center gap-3 mb-3">
-                        <div 
+                        <div
                             className="h-4 w-4 rounded-full"
                             style={{ backgroundColor: details.riskColor }}
                         ></div>
@@ -96,7 +97,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                             Transacción: {details.id}
                         </div>
                     </div>
-                    
+
                     <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                             <span className="text-slate-600">Score de Riesgo:</span>
@@ -386,7 +387,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
 
         // Sugerencias generales basadas en múltiples hallazgos
         const totalHighRiskFindings = suggestions.filter(s => s.priority === 'CRITICAL' || s.priority === 'HIGH').length;
-        
+
         if (totalHighRiskFindings >= 3) {
             suggestions.unshift({
                 id: 'general_critical',
@@ -407,11 +408,11 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
         }
 
         // Sugerencias de muestreo específicas
-        const totalAnomalies = (analysisData.entropy?.anomalousCount || 0) + 
-                              (analysisData.splitting?.suspiciousVendors || 0) + 
-                              (analysisData.sequential?.totalGaps || 0) + 
-                              (analysisData.isolationForest?.totalAnomalies || 0) + 
-                              (analysisData.actorProfiling?.totalSuspiciousActors || 0);
+        const totalAnomalies = (analysisData.entropy?.anomalousCount || 0) +
+            (analysisData.splitting?.suspiciousVendors || 0) +
+            (analysisData.sequential?.totalGaps || 0) +
+            (analysisData.isolationForest?.totalAnomalies || 0) +
+            (analysisData.actorProfiling?.totalSuspiciousActors || 0);
 
         if (totalAnomalies > 20) {
             suggestions.push({
@@ -462,8 +463,8 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                 value: analysisData.splitting.suspiciousVendors,
                 subtitle: `${analysisData.splitting.totalSuspiciousTransactions} transacciones`,
                 icon: 'fa-scissors',
-                color: analysisData.splitting.highRiskGroups > 0 ? 'red' : 
-                       analysisData.splitting.suspiciousVendors > 0 ? 'yellow' : 'green',
+                color: analysisData.splitting.highRiskGroups > 0 ? 'red' :
+                    analysisData.splitting.suspiciousVendors > 0 ? 'yellow' : 'green',
                 description: `Score promedio: ${analysisData.splitting.averageRiskScore.toFixed(1)}`
             });
         }
@@ -476,8 +477,8 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                 value: analysisData.sequential.totalGaps,
                 subtitle: `${analysisData.sequential.totalMissingDocuments} docs faltantes`,
                 icon: 'fa-barcode',
-                color: analysisData.sequential.highRiskGaps > 0 ? 'red' : 
-                       analysisData.sequential.totalGaps > 0 ? 'yellow' : 'green',
+                color: analysisData.sequential.highRiskGaps > 0 ? 'red' :
+                    analysisData.sequential.totalGaps > 0 ? 'yellow' : 'green',
                 description: `Gap más grande: ${analysisData.sequential.largestGap}`
             });
         }
@@ -501,8 +502,8 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                 value: analysisData.isolationForest.totalAnomalies,
                 subtitle: `${analysisData.isolationForest.highRiskAnomalies} de alto riesgo`,
                 icon: 'fa-brain',
-                color: analysisData.isolationForest.highRiskAnomalies > 0 ? 'red' : 
-                       analysisData.isolationForest.totalAnomalies > 5 ? 'yellow' : 'green',
+                color: analysisData.isolationForest.highRiskAnomalies > 0 ? 'red' :
+                    analysisData.isolationForest.totalAnomalies > 5 ? 'yellow' : 'green',
                 description: `Umbral: ${analysisData.isolationForest.anomalyThreshold.toFixed(3)}`
             });
         }
@@ -515,8 +516,8 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                 value: analysisData.actorProfiling.totalSuspiciousActors,
                 subtitle: `${analysisData.actorProfiling.highRiskActors} de alto riesgo`,
                 icon: 'fa-user-secret',
-                color: analysisData.actorProfiling.highRiskActors > 0 ? 'red' : 
-                       analysisData.actorProfiling.totalSuspiciousActors > 0 ? 'yellow' : 'green',
+                color: analysisData.actorProfiling.highRiskActors > 0 ? 'red' :
+                    analysisData.actorProfiling.totalSuspiciousActors > 0 ? 'yellow' : 'green',
                 description: `Score promedio: ${analysisData.actorProfiling.averageRiskScore.toFixed(1)}`
             });
         }
@@ -524,9 +525,9 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
         // Enhanced Benford Analysis
         if (analysisData.enhancedBenford) {
             const conformityColor = analysisData.enhancedBenford.overallDeviation > 3 ? 'red' :
-                                  analysisData.enhancedBenford.overallDeviation > 1.5 ? 'yellow' :
-                                  analysisData.enhancedBenford.overallDeviation > 1.2 ? 'yellow' : 'green';
-            
+                analysisData.enhancedBenford.overallDeviation > 1.5 ? 'yellow' :
+                    analysisData.enhancedBenford.overallDeviation > 1.2 ? 'yellow' : 'green';
+
             metrics.push({
                 id: 'enhanced_benford',
                 title: 'Benford Mejorado',
@@ -544,8 +545,8 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
             value: analysisData.outliersCount,
             subtitle: 'outliers detectados',
             icon: 'fa-expand-arrows-alt',
-            color: analysisData.outliersCount > 10 ? 'red' : 
-                   analysisData.outliersCount > 5 ? 'yellow' : 'green',
+            color: analysisData.outliersCount > 10 ? 'red' :
+                analysisData.outliersCount > 5 ? 'yellow' : 'green',
             description: `Umbral: ${analysisData.outliersThreshold.toLocaleString()}`
         });
 
@@ -555,8 +556,8 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
             value: analysisData.duplicatesCount,
             subtitle: 'transacciones repetidas',
             icon: 'fa-copy',
-            color: analysisData.duplicatesCount > 5 ? 'red' : 
-                   analysisData.duplicatesCount > 0 ? 'yellow' : 'green',
+            color: analysisData.duplicatesCount > 5 ? 'red' :
+                analysisData.duplicatesCount > 0 ? 'yellow' : 'green',
             description: 'Detección inteligente por mapeo'
         });
 
@@ -579,7 +580,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
 
     useEffect(() => {
         analyzeRisk();
-        
+
         // Configurar sincronización offline si es móvil
         if (isMobile) {
             offlineSync.onSyncStatus('risk-analysis', (status) => {
@@ -611,9 +612,9 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                     setScatterData(cachedData.scatterData);
                     setInsight(cachedData.insight);
                     setProgressMessage('Análisis cargado desde cache');
-                    
+
                     addToast("Análisis cargado desde cache - Rendimiento optimizado", 'success');
-                    
+
                     setTimeout(() => {
                         setShowProgressNotification(false);
                         setLoading(false);
@@ -623,10 +624,10 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
             }
 
             setIsUsingCache(false);
-            
+
             // 2. Determinar si usar lazy loading para poblaciones grandes
             const shouldUseLazyLoading = population.total_rows > 2000;
-            
+
             if (shouldUseLazyLoading) {
                 console.log(`🚀 Población grande (${population.total_rows} registros) - Usando lazy loading`);
                 await analyzeWithLazyLoading();
@@ -647,10 +648,10 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
     // Análisis con lazy loading para poblaciones grandes
     const analyzeWithLazyLoading = async () => {
         setProgressMessage('Cargando datos progresivamente...');
-        
+
         let allRows: any[] = [];
         let batchCount = 0;
-        
+
         await lazyLoader.loadProgressively(
             population.id,
             population.total_rows,
@@ -665,7 +666,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
             (batchData: any[], batchIndex: number) => {
                 allRows.push(...batchData);
                 batchCount++;
-                
+
                 // Procesar en background cada 3 lotes para mantener UI responsiva
                 if (batchCount % 3 === 0) {
                     const taskId = backgroundProcessor.addTask(
@@ -680,7 +681,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
             async (allData: any[]) => {
                 console.log(`✅ Lazy loading completado: ${allData.length} registros`);
                 setProgressMessage('Procesando análisis forense...');
-                
+
                 // Procesar análisis en background
                 const taskId = backgroundProcessor.addTask(
                     'risk_analysis',
@@ -688,9 +689,9 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                     'high',
                     15000 // 15 segundos estimados
                 );
-                
+
                 setBackgroundTasks(prev => [...prev, taskId]);
-                
+
                 // Simular procesamiento (en producción sería el análisis real)
                 await processAnalysisData(allData);
             },
@@ -705,7 +706,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
     // Análisis directo para poblaciones pequeñas
     const analyzeDirectly = async () => {
         setProgressMessage('Cargando datos de población...');
-        
+
         // Fetch data using existing API
         const res = await fetch(`/api/get_validation_data?id=${population.id}`);
         if (!res.ok) throw new Error('Failed to load analysis data via proxy');
@@ -721,7 +722,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
     const processAnalysisData = async (rows: any[]) => {
         // Ejecutar análisis de riesgo
         const { updatedRows, profile: newProfile, advancedAnalysis } = performRiskProfiling(rows, population);
-        
+
         setProfile(newProfile);
         setAnalysisData(advancedAnalysis);
 
@@ -761,7 +762,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                 version: '1.0'
             }
         };
-        
+
         cache.setCache(population.id, population, cacheData);
 
         // Guardar offline si es móvil
@@ -777,11 +778,23 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
         // Guardar risk_factors en la base de datos
         console.log(`💾 Guardando risk_factors para ${updatedRows.length} registros...`);
         try {
-            const updates = updatedRows.map(r => ({
-                id: r.id,
-                risk_score: r.risk_score || 0,
-                risk_factors: r.risk_factors || []
-            }));
+            // 🎯 FIX: Usar unique_id_col como id (es el PK real de audit_data_rows)
+            // El backend espera 'id' como string, pero necesitamos mapear correctamente
+            const updates = updatedRows
+                .filter(r => r.unique_id_col) // Solo incluir rows con ID válido
+                .map(r => ({
+                    id: r.unique_id_col,  // ✅ Este es el PK real (string)
+                    risk_score: r.risk_score || 0,
+                    risk_factors: r.risk_factors || []
+                }));
+
+            if (updates.length === 0) {
+                console.warn('⚠️ No hay registros con unique_id_col válido para actualizar');
+                addToast('Advertencia: No se pudieron actualizar factores de riesgo', 'warning');
+                return;
+            }
+
+            console.log(`📤 Enviando ${updates.length} actualizaciones de risk_factors...`);
 
             const response = await fetch('/api/update_risk_batch', {
                 method: 'POST',
@@ -791,10 +804,12 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
 
             if (response.ok) {
                 const result = await response.json();
-                console.log(`✅ Risk factors guardados: ${result.count} registros actualizados`);
-                addToast(`Análisis completado: ${result.count} registros actualizados con factores de riesgo`, 'success');
+                const updatedCount = result.count ?? updates.length;
+                console.log(`✅ Risk factors guardados: ${updatedCount} registros actualizados`);
+                addToast(`Análisis completado: ${updatedCount} registros actualizados con factores de riesgo`, 'success');
             } else {
-                console.error('❌ Error guardando risk_factors:', await response.text());
+                const errorText = await response.text();
+                console.error('❌ Error guardando risk_factors:', errorText);
                 addToast('Advertencia: Los factores de riesgo no se guardaron correctamente', 'warning');
             }
         } catch (error) {
@@ -812,25 +827,44 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
 
     const handleExportReport = async () => {
         if (isGeneratingReport) return;
-        
+
         if (!profile || !analysisData) {
             addToast('No hay datos de análisis disponibles para exportar', 'error');
             return;
         }
-        
+
         setIsGeneratingReport(true);
         try {
-            // Generar reporte estándar (mantener funcionalidad existente)
+            // Capturar gráfico como imagen de alta calidad
+            let chartImage: string | undefined;
+            const chartElement = document.getElementById('risk-scatter-chart');
+
+            if (chartElement && !isMobile) {
+                try {
+                    const canvas = await html2canvas(chartElement, {
+                        scale: 2, // Alta resolución
+                        backgroundColor: '#ffffff',
+                        logging: false,
+                        useCORS: true
+                    });
+                    chartImage = canvas.toDataURL('image/png');
+                } catch (error) {
+                    console.warn('No se pudo capturar el gráfico, usando versión dibujada:', error);
+                }
+            }
+
+            // Generar reporte estándar con imagen del gráfico
             await generateRiskAnalysisReport({
                 population,
                 profile,
                 analysisData,
                 scatterData,
                 insight,
+                chartImage, // Nueva propiedad
                 generatedBy: 'Auditor Principal',
                 generatedDate: new Date()
             });
-            
+
             // Si es móvil, generar también versión móvil
             if (isMobile) {
                 await mobileReports.generateRiskAnalysis({
@@ -842,7 +876,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                     generatedBy: 'Auditor Principal',
                     generatedDate: new Date()
                 });
-                
+
                 addToast('Reportes generados: versión estándar y móvil', 'success');
             } else {
                 addToast('Reporte de análisis de riesgo generado exitosamente', 'success');
@@ -935,7 +969,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                         <span>{lazyLoadState.loadedRows.toLocaleString()} / {lazyLoadState.totalRows.toLocaleString()}</span>
                     </div>
                     <div className="w-full bg-slate-200 rounded-full h-2">
-                        <div 
+                        <div
                             className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
                             style={{ width: `${lazyLoadState.progress}%` }}
                         ></div>
@@ -992,7 +1026,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                             </h2>
                         </div>
                     </div>
-                    
+
                     <div className={`flex items-center ${isMobile ? 'flex-col gap-4 w-full' : 'gap-6'}`}>
                         <div className={`flex ${isMobile ? 'justify-center w-full' : 'gap-10'} bg-white/5 ${isMobile ? 'p-4' : 'p-8'} rounded-[2.5rem] border border-white/10 backdrop-blur-xl`}>
                             <div className="text-center">
@@ -1013,7 +1047,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                                 </div>
                             </div>
                         </div>
-                        
+
                         <div className={`flex ${isMobile ? 'flex-col gap-2 w-full' : 'gap-4'}`}>
                             <button
                                 onClick={handleExportReport}
@@ -1032,7 +1066,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                                     </>
                                 )}
                             </button>
-                            
+
                             {/* Botón de vista previa móvil */}
                             {isMobile && (
                                 <button
@@ -1046,7 +1080,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                         </div>
                     </div>
                 </div>
-                
+
                 {/* Indicador de estado offline para móvil */}
                 {isMobile && isOffline && (
                     <div className="absolute top-4 right-4 bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-xs font-bold">
@@ -1074,7 +1108,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Red de Dispersión Forense</h4>
                             </div>
 
-                            <div className="h-[400px]">
+                            <div id="risk-scatter-chart" className="h-[400px]">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
@@ -1083,16 +1117,16 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                                         <ZAxis type="number" dataKey="z" range={[50, 800]} />
                                         <Tooltip content={<CustomTooltip />} />
                                         <ReferenceLine y={75} stroke="#f43f5e" strokeDasharray="5 5" label={{ position: 'right', value: 'ALTA PRIORIDAD', fill: '#f43f5e', fontSize: 8, fontWeight: 'bold' }} />
-                                        <Scatter 
-                                            name="Hallazgos" 
+                                        <Scatter
+                                            name="Hallazgos"
                                             data={getFilteredScatterData()}
                                             onClick={handlePointClick}
                                             style={{ cursor: 'pointer' }}
                                         >
                                             {getFilteredScatterData().map((entry, index) => (
-                                                <Cell 
-                                                    key={`cell-${index}`} 
-                                                    fill={entry.y > 75 ? '#f43f5e' : entry.y > 40 ? '#f59e0b' : '#10b981'} 
+                                                <Cell
+                                                    key={`cell-${index}`}
+                                                    fill={entry.y > 75 ? '#f43f5e' : entry.y > 40 ? '#f59e0b' : '#10b981'}
                                                     fillOpacity={0.7}
                                                     stroke={entry.y > 75 ? '#dc2626' : entry.y > 40 ? '#d97706' : '#059669'}
                                                     strokeWidth={1}
@@ -1108,40 +1142,37 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                             <div className="mt-6 flex flex-wrap gap-3 justify-center">
                                 <button
                                     onClick={() => toggleRiskLevel('high')}
-                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                                        visibleRiskLevels.high 
-                                            ? 'bg-red-100 text-red-800 border-2 border-red-300' 
-                                            : 'bg-gray-100 text-gray-500 border-2 border-gray-200'
-                                    }`}
+                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${visibleRiskLevels.high
+                                        ? 'bg-red-100 text-red-800 border-2 border-red-300'
+                                        : 'bg-gray-100 text-gray-500 border-2 border-gray-200'
+                                        }`}
                                 >
                                     <div className={`h-3 w-3 rounded-full ${visibleRiskLevels.high ? 'bg-red-500' : 'bg-gray-400'}`}></div>
                                     Alto Riesgo ({scatterData.filter(p => p.y > 75).length})
                                 </button>
-                                
+
                                 <button
                                     onClick={() => toggleRiskLevel('medium')}
-                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                                        visibleRiskLevels.medium 
-                                            ? 'bg-yellow-100 text-yellow-800 border-2 border-yellow-300' 
-                                            : 'bg-gray-100 text-gray-500 border-2 border-gray-200'
-                                    }`}
+                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${visibleRiskLevels.medium
+                                        ? 'bg-yellow-100 text-yellow-800 border-2 border-yellow-300'
+                                        : 'bg-gray-100 text-gray-500 border-2 border-gray-200'
+                                        }`}
                                 >
                                     <div className={`h-3 w-3 rounded-full ${visibleRiskLevels.medium ? 'bg-yellow-500' : 'bg-gray-400'}`}></div>
                                     Riesgo Medio ({scatterData.filter(p => p.y > 40 && p.y <= 75).length})
                                 </button>
-                                
+
                                 <button
                                     onClick={() => toggleRiskLevel('low')}
-                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                                        visibleRiskLevels.low 
-                                            ? 'bg-green-100 text-green-800 border-2 border-green-300' 
-                                            : 'bg-gray-100 text-gray-500 border-2 border-gray-200'
-                                    }`}
+                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${visibleRiskLevels.low
+                                        ? 'bg-green-100 text-green-800 border-2 border-green-300'
+                                        : 'bg-gray-100 text-gray-500 border-2 border-gray-200'
+                                        }`}
                                 >
                                     <div className={`h-3 w-3 rounded-full ${visibleRiskLevels.low ? 'bg-green-500' : 'bg-gray-400'}`}></div>
                                     Bajo Riesgo ({scatterData.filter(p => p.y <= 40).length})
                                 </button>
-                                
+
                                 <button
                                     onClick={() => setVisibleRiskLevels({ high: true, medium: true, low: true })}
                                     className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold bg-slate-100 text-slate-700 border-2 border-slate-300 hover:bg-slate-200 transition-all"
@@ -1168,7 +1199,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                             "{insight}"
                         </p>
                     </div>
-                    
+
                     {/* Panel de estado offline para móvil */}
                     {isMobile && (
                         <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
@@ -1185,7 +1216,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                                     </span>
                                 )}
                             </div>
-                            
+
                             <div className="grid grid-cols-3 gap-3 text-xs">
                                 <div className="text-center">
                                     <div className="font-bold text-slate-800">{offlineSync.stats.syncedItems}</div>
@@ -1200,7 +1231,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                                     <div className="text-slate-500">Almacenado</div>
                                 </div>
                             </div>
-                            
+
                             {isOffline && (
                                 <div className="mt-3 p-2 bg-orange-50 rounded-lg border border-orange-200">
                                     <div className="text-xs text-orange-800 flex items-center gap-2">
@@ -1242,11 +1273,10 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                                         <i className={`fas ${metric.icon} ${isMobile ? 'text-sm mr-2' : 'text-lg mr-3'}`}></i>
                                         <h5 className={`font-bold ${isMobile ? 'text-xs' : 'text-sm'}`}>{metric.title}</h5>
                                     </div>
-                                    <div className={`h-3 w-3 rounded-full ${
-                                        metric.color === 'red' ? 'bg-red-500' :
+                                    <div className={`h-3 w-3 rounded-full ${metric.color === 'red' ? 'bg-red-500' :
                                         metric.color === 'yellow' ? 'bg-yellow-500' :
-                                        metric.color === 'green' ? 'bg-green-500' : 'bg-blue-500'
-                                    }`}></div>
+                                            metric.color === 'green' ? 'bg-green-500' : 'bg-blue-500'
+                                        }`}></div>
                                 </div>
                                 <div className={`${isMobile ? 'text-2xl' : 'text-3xl'} font-black mb-2`}>{metric.value}</div>
                                 <div className={`${isMobile ? 'text-[10px]' : 'text-xs'} font-medium opacity-75 mb-2`}>{metric.subtitle}</div>
@@ -1263,7 +1293,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                             </div>
                             <h5 className={`${isMobile ? 'text-base' : 'text-lg'} font-bold text-slate-800`}>Resumen de Hallazgos Forenses</h5>
                         </div>
-                        
+
                         <div className={`grid grid-cols-1 ${isMobile ? 'gap-4' : 'md:grid-cols-3 gap-6'}`}>
                             <div className="text-center">
                                 <div className={`${isMobile ? 'text-xl' : 'text-2xl'} font-black text-red-600`}>
@@ -1294,11 +1324,11 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                                 <div>
                                     <h6 className={`font-bold text-slate-800 mb-2 ${isMobile ? 'text-sm' : ''}`}>Recomendación de Muestreo</h6>
                                     <p className={`${isMobile ? 'text-xs' : 'text-sm'} text-slate-600 leading-relaxed`}>
-                                        {getForensicMetrics().filter(m => m.color === 'red').length > 0 
+                                        {getForensicMetrics().filter(m => m.color === 'red').length > 0
                                             ? "🚨 Se detectaron anomalías de ALTO RIESGO. Se recomienda muestreo dirigido enfocado en las áreas problemáticas identificadas y revisión manual detallada antes de proceder."
                                             : getForensicMetrics().filter(m => m.color === 'yellow').length > 0
-                                            ? "⚠️ Se detectaron anomalías de RIESGO MEDIO. Se recomienda aumentar el tamaño de muestra y considerar muestreo estratificado para abordar estas áreas."
-                                            : "✅ La población presenta un perfil de riesgo BAJO. Se puede proceder con muestreo estadístico estándar con confianza."
+                                                ? "⚠️ Se detectaron anomalías de RIESGO MEDIO. Se recomienda aumentar el tamaño de muestra y considerar muestreo estratificado para abordar estas áreas."
+                                                : "✅ La población presenta un perfil de riesgo BAJO. Se puede proceder con muestreo estadístico estándar con confianza."
                                         }
                                     </p>
                                 </div>
@@ -1327,7 +1357,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
 
                     {(() => {
                         const suggestions = generateIntelligentSuggestions();
-                        
+
                         if (suggestions.length === 0) {
                             return (
                                 <div className="text-center py-12">
@@ -1412,7 +1442,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                                         </div>
                                     );
                                 })}
-                                
+
                                 {isMobile && suggestions.length > 3 && (
                                     <div className="text-center">
                                         <button
@@ -1442,10 +1472,10 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                                 <i className="fas fa-times text-slate-600"></i>
                             </button>
                         </div>
-                        
+
                         <div className="overflow-y-auto max-h-[calc(90vh-120px)]">
-                            <div 
-                                dangerouslySetInnerHTML={{ 
+                            <div
+                                dangerouslySetInnerHTML={{
                                     __html: mobileReports.generatePreview({
                                         population,
                                         profile,
@@ -1455,7 +1485,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                                 }}
                             />
                         </div>
-                        
+
                         <div className="p-4 border-t border-slate-200 flex gap-3">
                             <button
                                 onClick={() => setShowMobilePreview(false)}
@@ -1497,7 +1527,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                     <div className={`bg-white rounded-3xl ${adaptiveUI.modalSize} w-full max-h-[90vh] overflow-y-auto`}>
                         <div className={`flex items-center justify-between mb-6 ${isMobile ? 'p-4' : 'p-8'}`}>
                             <div className="flex items-center gap-4">
-                                <div 
+                                <div
                                     className={`${isMobile ? 'h-5 w-5' : 'h-6 w-6'} rounded-full`}
                                     style={{ backgroundColor: selectedPoint.riskColor }}
                                 ></div>
@@ -1549,7 +1579,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                                     </div>
                                     <div className="flex justify-between">
                                         <span className="text-slate-600">Nivel de Riesgo:</span>
-                                        <span 
+                                        <span
                                             className="font-bold px-3 py-1 rounded-full text-sm text-white"
                                             style={{ backgroundColor: selectedPoint.riskColor }}
                                         >
@@ -1568,7 +1598,7 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
                             <div className="grid grid-cols-1 gap-3">
                                 {selectedPoint.riskFactors.map((factor: string, index: number) => (
                                     <div key={index} className="flex items-center gap-3 p-3 bg-white rounded-xl">
-                                        <div 
+                                        <div
                                             className="h-2 w-2 rounded-full"
                                             style={{ backgroundColor: selectedPoint.riskColor }}
                                         ></div>

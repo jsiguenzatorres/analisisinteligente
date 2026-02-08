@@ -6,39 +6,41 @@ import { samplingProxyFetch, FetchTimeoutError, FetchNetworkError } from '../../
 
 interface Props {
     populationId: string;
+    currentMethod: SamplingMethod;
     onLoadSample: (sample: HistoricalSample) => void;
     onBack: () => void;
 }
 
-const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onBack }) => {
+const SampleHistoryManager: React.FC<Props> = ({ populationId, currentMethod, onLoadSample, onBack }) => {
     const [history, setHistory] = useState<HistoricalSample[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [methodMismatchSample, setMethodMismatchSample] = useState<HistoricalSample | null>(null);
 
     useEffect(() => {
         const fetchHistory = async () => {
             setLoading(true);
             setError(null);
-            
+
             try {
                 console.log("🌐 Cargando historial vía proxy con timeout...");
-                
+
                 // Usar el proxy con timeout y manejo de errores mejorado
                 const { history: historyData } = await samplingProxyFetch('get_history', {
                     population_id: populationId
                 });
-                
+
                 if (historyData) {
                     setHistory(historyData as HistoricalSample[]);
                 } else {
                     setHistory([]);
                 }
-                
+
             } catch (err: any) {
                 console.error("Error fetching history:", err);
-                
+
                 let errorMessage = "Error al cargar el historial";
-                
+
                 if (err instanceof FetchTimeoutError) {
                     errorMessage = "Timeout: La carga tardó demasiado tiempo. Verifique su conexión.";
                 } else if (err instanceof FetchNetworkError) {
@@ -46,14 +48,14 @@ const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onB
                 } else {
                     errorMessage += ": " + (err.message || "Error desconocido");
                 }
-                
+
                 setError(errorMessage);
                 setHistory([]);
             } finally {
                 setLoading(false);
             }
         };
-        
+
         if (populationId) {
             fetchHistory();
         }
@@ -68,6 +70,17 @@ const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onB
             [SamplingMethod.NonStatistical]: 'bg-teal-100 text-teal-700 border-teal-200',
         };
         return <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase border ${styles[method]}`}>{method}</span>;
+    };
+
+    const getMethodName = (method: SamplingMethod): string => {
+        const names: Record<SamplingMethod, string> = {
+            [SamplingMethod.Attribute]: 'Muestreo por Atributos',
+            [SamplingMethod.MUS]: 'Muestreo MUS',
+            [SamplingMethod.CAV]: 'Muestreo CAV',
+            [SamplingMethod.Stratified]: 'Muestreo Estratificado',
+            [SamplingMethod.NonStatistical]: 'Muestreo No Estadístico'
+        };
+        return names[method] || method;
     };
 
     return (
@@ -108,12 +121,12 @@ const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onB
                                     const fetchHistory = async () => {
                                         setLoading(true);
                                         setError(null);
-                                        
+
                                         try {
                                             const { history: historyData } = await samplingProxyFetch('get_history', {
                                                 population_id: populationId
                                             });
-                                            
+
                                             if (historyData) {
                                                 setHistory(historyData as HistoricalSample[]);
                                             } else {
@@ -121,7 +134,7 @@ const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onB
                                             }
                                         } catch (err: any) {
                                             console.error("Error fetching history:", err);
-                                            
+
                                             let errorMessage = "Error al cargar el historial";
                                             if (err instanceof FetchTimeoutError) {
                                                 errorMessage = "Timeout: La carga tardó demasiado tiempo";
@@ -130,7 +143,7 @@ const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onB
                                             } else {
                                                 errorMessage += ": " + (err.message || "Error desconocido");
                                             }
-                                            
+
                                             setError(errorMessage);
                                             setHistory([]);
                                         } finally {
@@ -163,7 +176,14 @@ const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onB
                     {history.map((sample) => (
                         <div
                             key={sample.id}
-                            onClick={() => onLoadSample(sample)}
+                            onClick={() => {
+                                // Validar que el método coincida
+                                if (sample.method !== currentMethod) {
+                                    setMethodMismatchSample(sample);
+                                    return;
+                                }
+                                onLoadSample(sample);
+                            }}
                             className={`bg-white rounded-3xl border p-7 shadow-sm hover:shadow-2xl transition-all cursor-pointer group relative overflow-hidden ${sample.is_current ? 'border-emerald-500 ring-4 ring-emerald-50' : 'border-slate-200'}`}
                         >
                             {sample.is_current && (
@@ -204,6 +224,79 @@ const SampleHistoryManager: React.FC<Props> = ({ populationId, onLoadSample, onB
                             </div>
                         </div>
                     ))}
+                </div>
+            )}
+
+            {/* Modal: Método Incompatible */}
+            {methodMismatchSample && (
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
+                    <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+                        {/* Header con gradiente */}
+                        <div className="bg-gradient-to-r from-amber-500 to-orange-500 p-6 text-center relative overflow-hidden">
+                            <div className="absolute top-0 right-0 opacity-10">
+                                <i className="fas fa-exclamation-triangle text-9xl text-white"></i>
+                            </div>
+                            <div className="relative z-10">
+                                <div className="h-16 w-16 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center mx-auto mb-3">
+                                    <i className="fas fa-ban text-3xl text-white"></i>
+                                </div>
+                                <h3 className="text-2xl font-black text-white uppercase tracking-tight">
+                                    Método Incompatible
+                                </h3>
+                            </div>
+                        </div>
+
+                        {/* Contenido */}
+                        <div className="p-8 space-y-6">
+                            <div className="text-center">
+                                <p className="text-slate-700 leading-relaxed mb-4">
+                                    Esta muestra fue generada con el método <span className="font-black text-amber-600">{getMethodName(methodMismatchSample.method)}</span>.
+                                </p>
+                                <p className="text-slate-600 text-sm leading-relaxed">
+                                    Para revisar su detalle, debe navegar a:
+                                </p>
+                            </div>
+
+                            {/* Ruta visual */}
+                            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-4">
+                                <div className="flex items-center justify-center gap-2 text-sm font-bold text-blue-900 flex-wrap">
+                                    <i className="fas fa-chart-bar text-blue-500"></i>
+                                    <span>Resultados</span>
+                                    <i className="fas fa-chevron-right text-blue-300 text-xs"></i>
+                                    <span className="text-blue-600">{getMethodName(methodMismatchSample.method)}</span>
+                                    <i className="fas fa-chevron-right text-blue-300 text-xs"></i>
+                                    <span>Archivo Histórico</span>
+                                </div>
+                            </div>
+
+                            {/* Información adicional */}
+                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                                <div className="grid grid-cols-2 gap-4 text-center">
+                                    <div>
+                                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Fecha</p>
+                                        <p className="text-xs font-bold text-slate-700">
+                                            {new Date(methodMismatchSample.created_at).toLocaleDateString()}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Muestra</p>
+                                        <p className="text-xs font-bold text-slate-700">
+                                            {methodMismatchSample.sample_size} ítems
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Botón */}
+                            <button
+                                onClick={() => setMethodMismatchSample(null)}
+                                className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-xl font-black text-sm uppercase tracking-widest hover:from-blue-700 hover:to-indigo-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-1"
+                            >
+                                <i className="fas fa-check mr-2"></i>
+                                Entendido
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

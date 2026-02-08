@@ -36,7 +36,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
     const [forensicConfigOpen, setForensicConfigOpen] = useState(false);
     const [isRunningForensicAnalysis, setIsRunningForensicAnalysis] = useState(false);
     const [forensicResults, setForensicResults] = useState<AdvancedAnalysis | null>(null);
-    
+
     // Estados para modal explicativo
     const [explanationModalOpen, setExplanationModalOpen] = useState(false);
     const [selectedMethod, setSelectedMethod] = useState<string | null>(null);
@@ -221,7 +221,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
         if (!appState.selectedPopulation) return;
 
         setIsRunningForensicAnalysis(true);
-        
+
         try {
             // Simular llamada al análisis forense con configuración
             const response = await samplingProxyFetch('run_forensic_analysis', {
@@ -235,6 +235,17 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
 
             if (response.success) {
                 setForensicResults(response.analysis);
+
+                // CRÍTICO: Actualizar el advanced_analysis en appState para mantener consistencia
+                // en todos los componentes que leen de esta fuente
+                setAppState(prev => ({
+                    ...prev,
+                    selectedPopulation: prev.selectedPopulation ? {
+                        ...prev.selectedPopulation,
+                        advanced_analysis: response.analysis
+                    } : prev.selectedPopulation
+                }));
+
                 setForensicResultsOpen(true);
             } else {
                 console.error('Error en análisis forense:', response.error);
@@ -290,7 +301,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         population_id: appState.selectedPopulation.id,
                         detailed: 'true'
                     });
-                    
+
                     // Filtrar en el cliente para evitar consultas SQL complejas
                     rows = (directRows || []).filter(r => {
                         switch (type) {
@@ -318,7 +329,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         population_id: appState.selectedPopulation.id,
                         sample_size: 100
                     });
-                    
+
                     const threshold = analysis?.outliersThreshold || 0;
                     rows = (outlierRows || []).filter(r => (r.monetary_value_col || 0) > threshold);
                     break;
@@ -330,7 +341,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         population_id: appState.selectedPopulation.id,
                         include_factors: 'true'
                     });
-                    
+
                     rows = (riskRows || []).filter(r => {
                         const factors = r.risk_factors || [];
                         if (type === 'Duplicates') {
@@ -348,7 +359,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         population_id: appState.selectedPopulation.id,
                         include_factors: 'true'
                     });
-                    
+
                     rows = (entropyRows || []).filter(r => {
                         const factors = r.risk_factors || [];
                         return factors.some((f: string) => f.toLowerCase().includes('entropy') || f.toLowerCase().includes('categoria'));
@@ -361,7 +372,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         population_id: appState.selectedPopulation.id,
                         include_factors: 'true'
                     });
-                    
+
                     rows = (splittingRows || []).filter(r => {
                         const factors = r.risk_factors || [];
                         return factors.some((f: string) => f.toLowerCase().includes('splitting') || f.toLowerCase().includes('fraccionamiento'));
@@ -374,7 +385,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         population_id: appState.selectedPopulation.id,
                         include_factors: 'true'
                     });
-                    
+
                     rows = (sequentialRows || []).filter(r => {
                         const factors = r.risk_factors || [];
                         return factors.some((f: string) => f.toLowerCase().includes('gap') || f.toLowerCase().includes('secuencial'));
@@ -387,7 +398,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         population_id: appState.selectedPopulation.id,
                         include_factors: 'true'
                     });
-                    
+
                     rows = (isolationRows || []).filter(r => {
                         const factors = r.risk_factors || [];
                         return factors.some((f: string) => f.toLowerCase().includes('isolation') || f.toLowerCase().includes('ml_anomaly'));
@@ -400,7 +411,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         population_id: appState.selectedPopulation.id,
                         include_factors: 'true'
                     });
-                    
+
                     rows = (actorRows || []).filter(r => {
                         const factors = r.risk_factors || [];
                         return factors.some((f: string) => f.toLowerCase().includes('actor') || f.toLowerCase().includes('usuario_sospechoso'));
@@ -413,7 +424,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         population_id: appState.selectedPopulation.id,
                         include_factors: 'true'
                     });
-                    
+
                     rows = (enhancedBenfordRows || []).filter(r => {
                         const factors = r.risk_factors || [];
                         return factors.some((f: string) => f.toLowerCase().includes('enhanced_benford') || f.toLowerCase().includes('segundo_digito'));
@@ -434,7 +445,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                                 const rawData = typeof r.raw_json === 'string' ? JSON.parse(r.raw_json) : r.raw_json;
                                 const dateValue = rawData?.[dateField];
                                 if (!dateValue) return false;
-                                
+
                                 const d = new Date(dateValue);
                                 return !isNaN(d.getTime()) && (d.getDay() === 0 || d.getDay() === 6);
                             } catch (error) {
@@ -447,10 +458,10 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
 
                 case 'Campos Vacíos':
                     // Obtener muestra y filtrar por campos vacíos en el cliente
-                    const textField = appState.selectedPopulation.column_mapping.category || 
-                                    appState.selectedPopulation.column_mapping.subcategory || 
-                                    appState.selectedPopulation.column_mapping.vendor;
-                    
+                    const textField = appState.selectedPopulation.column_mapping.category ||
+                        appState.selectedPopulation.column_mapping.subcategory ||
+                        appState.selectedPopulation.column_mapping.vendor;
+
                     if (textField) {
                         const { rows: textRows } = await samplingProxyFetch('get_universe', {
                             population_id: appState.selectedPopulation.id,
@@ -476,7 +487,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         population_id: appState.selectedPopulation.id,
                         include_factors: 'true'
                     });
-                    
+
                     rows = (benfordRows || []).filter(r => {
                         const factors = r.risk_factors || [];
                         return factors.some((f: string) => f.toLowerCase().includes('benford'));
@@ -500,7 +511,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
 
         } catch (error: any) {
             console.error("Error fetching details:", error);
-            
+
             let errorMessage = "Error al cargar detalles";
             if (error instanceof FetchTimeoutError) {
                 errorMessage = "Timeout: La consulta tardó demasiado tiempo";
@@ -509,7 +520,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
             } else {
                 errorMessage += ": " + (error.message || "Error desconocido");
             }
-            
+
             // Mostrar error en el modal en lugar de cerrar
             setDetailItems([{
                 id: 'ERROR',
@@ -530,22 +541,22 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
     // Función para determinar el nivel de riesgo basado en los factores
     const getRiskLevel = (riskFactors: string[]): 'Alto' | 'Medio' | 'Bajo' => {
         if (!riskFactors || riskFactors.length === 0) return 'Bajo';
-        
+
         // Alto riesgo: 3+ factores o factores críticos
         const criticalFactors = ['benford', 'outlier', 'duplicado', 'splitting', 'gap', 'isolation', 'ml_anomaly'];
-        const hasCritical = riskFactors.some(f => 
+        const hasCritical = riskFactors.some(f =>
             criticalFactors.some(cf => f.toLowerCase().includes(cf))
         );
-        
+
         if (riskFactors.length >= 3 || (hasCritical && riskFactors.length >= 2)) {
             return 'Alto';
         }
-        
+
         // Medio riesgo: 2 factores o 1 factor crítico
         if (riskFactors.length >= 2 || hasCritical) {
             return 'Medio';
         }
-        
+
         // Bajo riesgo: 1 factor no crítico
         return 'Bajo';
     };
@@ -553,7 +564,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
     // Función para extraer el tipo de análisis de los factores de riesgo
     const getAnalysisType = (riskFactors: string[]): string => {
         if (!riskFactors || riskFactors.length === 0) return 'Otros';
-        
+
         const typeMap: { [key: string]: string } = {
             'benford': 'Ley de Benford',
             'enhanced_benford': 'Benford Avanzado',
@@ -572,7 +583,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
             'actor': 'Actores Sospechosos',
             'usuario_sospechoso': 'Actores Sospechosos'
         };
-        
+
         // Buscar el primer tipo que coincida
         for (const factor of riskFactors) {
             const lowerFactor = factor.toLowerCase();
@@ -582,7 +593,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                 }
             }
         }
-        
+
         return 'Otros';
     };
 
@@ -597,19 +608,19 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
             'Medio': {},
             'Bajo': {}
         };
-        
+
         items.forEach(item => {
             const riskFactors = item.raw?.risk_factors || [];
             const riskLevel = getRiskLevel(riskFactors);
             const analysisType = getAnalysisType(riskFactors);
-            
+
             if (!hierarchy[riskLevel][analysisType]) {
                 hierarchy[riskLevel][analysisType] = [];
             }
-            
+
             hierarchy[riskLevel][analysisType].push(item);
         });
-        
+
         return hierarchy;
     };
 
@@ -649,9 +660,9 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                 <div className="bg-teal-50 border-l-4 border-teal-500 p-4 rounded-r-lg flex items-center shadow-sm">
                     <i className="fas fa-microscope text-teal-600 mr-4 text-xl"></i>
                     <div>
-                        <h4 className="text-teal-900 font-black text-[11px] uppercase tracking-wider">Data Driven Insights</h4>
+                        <h4 className="text-teal-900 font-black text-[11px] uppercase tracking-wider">Análisis Forense y Selección de Criterios</h4>
                         <p className="text-[11px] text-teal-700 font-medium">
-                            El sistema ha analizado la población. Seleccione un enfoque para cargar automáticamente los criterios basados en riesgos detectados.
+                            Seleccione una tarjeta para cargar criterios automáticamente, o use los botones para ver explicaciones técnicas y detalles de hallazgos.
                         </p>
                     </div>
                 </div>
@@ -663,9 +674,22 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     >
                         <div className="flex justify-between items-center mb-3">
                             <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ley de Benford</h5>
-                            <button onClick={(e) => handleShowDetails(e, 'Benford')} className="text-emerald-500 hover:text-emerald-600 transition-colors">
-                                <i className="fas fa-list-ul"></i>
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleOpenMethodExplanation('benford'); }}
+                                    className="text-blue-500 hover:text-blue-600 transition-colors"
+                                    title="Ver Explicación Técnica"
+                                >
+                                    <i className="fas fa-info-circle"></i>
+                                </button>
+                                <button
+                                    onClick={(e) => handleShowDetails(e, 'Benford')}
+                                    className="text-emerald-500 hover:text-emerald-600 transition-colors"
+                                    title="Ver Ítems Detectados"
+                                >
+                                    <i className="fas fa-list-ul"></i>
+                                </button>
+                            </div>
                         </div>
                         <div className="flex justify-between items-end h-16">
                             <div className="flex-1 h-12 flex items-end gap-1 px-1">
@@ -686,9 +710,22 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     >
                         <div className="flex justify-between items-center mb-6">
                             <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Valores Atípicos</h5>
-                            <button onClick={(e) => handleShowDetails(e, 'Outliers')} className="text-purple-500 hover:text-purple-600">
-                                <i className="fas fa-expand-arrows-alt"></i>
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleOpenMethodExplanation('outliers'); }}
+                                    className="text-orange-500 hover:text-orange-600 transition-colors"
+                                    title="Ver Explicación Técnica"
+                                >
+                                    <i className="fas fa-info-circle"></i>
+                                </button>
+                                <button
+                                    onClick={(e) => handleShowDetails(e, 'Outliers')}
+                                    className="text-purple-500 hover:text-purple-600"
+                                    title="Ver Ítems Detectados"
+                                >
+                                    <i className="fas fa-expand-arrows-alt"></i>
+                                </button>
+                            </div>
                         </div>
                         <div className="text-center">
                             <div className="text-3xl font-black text-purple-600 leading-none">{analysis?.outliersCount || 0}</div>
@@ -702,9 +739,22 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     >
                         <div className="flex justify-between items-center mb-6">
                             <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Duplicados</h5>
-                            <button onClick={(e) => handleShowDetails(e, 'Duplicates')} className="text-orange-500 hover:text-orange-600">
-                                <i className="fas fa-copy"></i>
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleOpenMethodExplanation('duplicates'); }}
+                                    className="text-red-500 hover:text-red-600 transition-colors"
+                                    title="Ver Explicación Técnica"
+                                >
+                                    <i className="fas fa-info-circle"></i>
+                                </button>
+                                <button
+                                    onClick={(e) => handleShowDetails(e, 'Duplicates')}
+                                    className="text-orange-500 hover:text-orange-600"
+                                    title="Ver Ítems Detectados"
+                                >
+                                    <i className="fas fa-copy"></i>
+                                </button>
+                            </div>
                         </div>
                         <div className="text-center">
                             <div className="text-3xl font-black text-orange-500 leading-none">{analysis?.duplicatesCount || 0}</div>
@@ -718,9 +768,22 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     >
                         <div className="flex justify-between items-center mb-6">
                             <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Números Redondos</h5>
-                            <button onClick={(e) => handleShowDetails(e, 'RoundNumbers')} className="text-cyan-500 hover:text-cyan-600">
-                                <i className="fas fa-coins"></i>
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleOpenMethodExplanation('roundNumbers'); }}
+                                    className="text-indigo-500 hover:text-indigo-600 transition-colors"
+                                    title="Ver Explicación Técnica"
+                                >
+                                    <i className="fas fa-info-circle"></i>
+                                </button>
+                                <button
+                                    onClick={(e) => handleShowDetails(e, 'RoundNumbers')}
+                                    className="text-cyan-500 hover:text-cyan-600"
+                                    title="Ver Ítems Detectados"
+                                >
+                                    <i className="fas fa-coins"></i>
+                                </button>
+                            </div>
                         </div>
                         <div className="text-center">
                             <div className="text-2xl font-black text-slate-800 leading-none">{analysis?.roundNumbersCount || 0}</div>
@@ -734,9 +797,22 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     >
                         <div className="flex justify-between items-center mb-6">
                             <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Entropía</h5>
-                            <button onClick={(e) => handleShowDetails(e, 'Entropy')} className="text-indigo-500 hover:text-indigo-600">
-                                <i className="fas fa-random"></i>
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleOpenMethodExplanation('entropy'); }}
+                                    className="text-purple-500 hover:text-purple-600 transition-colors"
+                                    title="Ver Explicación Técnica"
+                                >
+                                    <i className="fas fa-info-circle"></i>
+                                </button>
+                                <button
+                                    onClick={(e) => handleShowDetails(e, 'Entropy')}
+                                    className="text-indigo-500 hover:text-indigo-600"
+                                    title="Ver Ítems Detectados"
+                                >
+                                    <i className="fas fa-random"></i>
+                                </button>
+                            </div>
                         </div>
                         <div className="text-center">
                             <div className="text-2xl font-black text-indigo-600 leading-none">{getEntropyAnomalies()}</div>
@@ -750,9 +826,22 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     >
                         <div className="flex justify-between items-center mb-6">
                             <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fraccionamiento</h5>
-                            <button onClick={(e) => handleShowDetails(e, 'Splitting')} className="text-red-500 hover:text-red-600">
-                                <i className="fas fa-cut"></i>
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleOpenMethodExplanation('splitting'); }}
+                                    className="text-yellow-500 hover:text-yellow-600 transition-colors"
+                                    title="Ver Explicación Técnica"
+                                >
+                                    <i className="fas fa-info-circle"></i>
+                                </button>
+                                <button
+                                    onClick={(e) => handleShowDetails(e, 'Splitting')}
+                                    className="text-red-500 hover:text-red-600"
+                                    title="Ver Ítems Detectados"
+                                >
+                                    <i className="fas fa-cut"></i>
+                                </button>
+                            </div>
                         </div>
                         <div className="text-center">
                             <div className="text-2xl font-black text-red-600 leading-none">{getSplittingGroups()}</div>
@@ -769,9 +858,22 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     >
                         <div className="flex justify-between items-center mb-6">
                             <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gaps Secuenciales</h5>
-                            <button onClick={(e) => handleShowDetails(e, 'Sequential')} className="text-yellow-500 hover:text-yellow-600">
-                                <i className="fas fa-list-ol"></i>
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleOpenMethodExplanation('sequential'); }}
+                                    className="text-red-500 hover:text-red-600 transition-colors"
+                                    title="Ver Explicación Técnica"
+                                >
+                                    <i className="fas fa-info-circle"></i>
+                                </button>
+                                <button
+                                    onClick={(e) => handleShowDetails(e, 'Sequential')}
+                                    className="text-yellow-500 hover:text-yellow-600"
+                                    title="Ver Ítems Detectados"
+                                >
+                                    <i className="fas fa-list-ol"></i>
+                                </button>
+                            </div>
                         </div>
                         <div className="text-center">
                             <div className="text-2xl font-black text-yellow-600 leading-none">{getSequentialGaps()}</div>
@@ -785,9 +887,22 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     >
                         <div className="flex justify-between items-center mb-6">
                             <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">ML Anomalías</h5>
-                            <button onClick={(e) => handleShowDetails(e, 'IsolationForest')} className="text-green-500 hover:text-green-600">
-                                <i className="fas fa-brain"></i>
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleOpenMethodExplanation('isolationForest'); }}
+                                    className="text-purple-500 hover:text-purple-600 transition-colors"
+                                    title="Ver Explicación Técnica"
+                                >
+                                    <i className="fas fa-info-circle"></i>
+                                </button>
+                                <button
+                                    onClick={(e) => handleShowDetails(e, 'IsolationForest')}
+                                    className="text-green-500 hover:text-green-600"
+                                    title="Ver Ítems Detectados"
+                                >
+                                    <i className="fas fa-brain"></i>
+                                </button>
+                            </div>
                         </div>
                         <div className="text-center">
                             <div className="text-2xl font-black text-green-600 leading-none">{getIsolationForestAnomalies()}</div>
@@ -801,9 +916,22 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     >
                         <div className="flex justify-between items-center mb-6">
                             <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Actores</h5>
-                            <button onClick={(e) => handleShowDetails(e, 'ActorProfiling')} className="text-pink-500 hover:text-pink-600">
-                                <i className="fas fa-user-secret"></i>
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleOpenMethodExplanation('actorProfiling'); }}
+                                    className="text-orange-500 hover:text-orange-600 transition-colors"
+                                    title="Ver Explicación Técnica"
+                                >
+                                    <i className="fas fa-info-circle"></i>
+                                </button>
+                                <button
+                                    onClick={(e) => handleShowDetails(e, 'ActorProfiling')}
+                                    className="text-pink-500 hover:text-pink-600"
+                                    title="Ver Ítems Detectados"
+                                >
+                                    <i className="fas fa-user-secret"></i>
+                                </button>
+                            </div>
                         </div>
                         <div className="text-center">
                             <div className="text-2xl font-black text-pink-600 leading-none">{getSuspiciousActors()}</div>
@@ -817,9 +945,22 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     >
                         <div className="flex justify-between items-center mb-6">
                             <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Benford Avanzado</h5>
-                            <button onClick={(e) => handleShowDetails(e, 'EnhancedBenford')} className="text-violet-500 hover:text-violet-600">
-                                <i className="fas fa-chart-line"></i>
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleOpenMethodExplanation('enhancedBenford'); }}
+                                    className="text-green-500 hover:text-green-600 transition-colors"
+                                    title="Ver Explicación Técnica"
+                                >
+                                    <i className="fas fa-info-circle"></i>
+                                </button>
+                                <button
+                                    onClick={(e) => handleShowDetails(e, 'EnhancedBenford')}
+                                    className="text-violet-500 hover:text-violet-600"
+                                    title="Ver Ítems Detectados"
+                                >
+                                    <i className="fas fa-chart-line"></i>
+                                </button>
+                            </div>
                         </div>
                         <div className="text-center">
                             <div className="text-2xl font-black text-violet-600 leading-none">{getEnhancedBenfordDeviation().toFixed(1)}%</div>
@@ -1225,13 +1366,13 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                                 <button
                                     onClick={() => {
                                         if (detailItems.length === 0 || isLoadingDetails) return;
-                                        
+
                                         const exportData = detailItems.map(item => ({
                                             ID: item.id,
                                             Valor: item.value,
                                             ...item.raw
                                         }));
-                                        
+
                                         const ws = utils.json_to_sheet(exportData);
                                         const wb = utils.book_new();
                                         utils.book_append_sheet(wb, ws, "Hallazgos");
@@ -1244,7 +1385,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                                 </button>
                             </div>
                         </div>
-                        
+
                         <div className="max-h-[600px] overflow-y-auto custom-scrollbar border rounded-2xl">
                             {isLoadingDetails ? (
                                 <div className="p-10 text-center">
@@ -1265,7 +1406,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                                             {detailItems[0]?.raw?.error || 'Error al cargar los datos'}
                                         </p>
                                         <button
-                                            onClick={() => handleShowDetails({ stopPropagation: () => {} } as any, detailType)}
+                                            onClick={() => handleShowDetails({ stopPropagation: () => { } } as any, detailType)}
                                             className="mt-3 bg-red-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-700 transition-all"
                                         >
                                             <i className="fas fa-redo mr-2"></i>Reintentar
@@ -1322,7 +1463,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                                                         <div className="bg-slate-50">
                                                             {Object.entries(analysisTypes).map(([analysisType, items]) => {
                                                                 if (items.length === 0) return null;
-                                                                
+
                                                                 const typeKey = `${riskLevel}-${analysisType}`;
                                                                 const isTypeExpanded = expandedAnalysisTypes.has(typeKey);
 
@@ -1406,7 +1547,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                                 </div>
                             )}
                         </div>
-                        
+
                         {detailItems.length > 0 && detailItems[0]?.id !== 'ERROR' && (
                             <div className="text-center p-2 bg-blue-50 rounded-lg border border-blue-200">
                                 <p className="text-xs text-blue-800 font-medium">
@@ -1436,327 +1577,7 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     </div>
                 </Modal>
 
-                {/* Botones de Métodos Forenses Individuales */}
-                <div className="mt-8 space-y-6">
-                    <div className="flex items-center gap-3 mb-6">
-                        <div className="h-10 w-10 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg flex items-center justify-center text-white">
-                            <i className="fas fa-search text-sm"></i>
-                        </div>
-                        <div>
-                            <h4 className="text-lg font-bold text-gray-800">Métodos de Análisis Forense</h4>
-                            <p className="text-sm text-gray-600">Haga clic en cualquier método para ver su explicación detallada</p>
-                        </div>
-                    </div>
 
-                    {/* Grid de Métodos Forenses */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {/* Análisis de Entropía */}
-                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl group">
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
-                                    <i className="fas fa-microchip text-xs"></i>
-                                </div>
-                                <div className="flex-1">
-                                    <h5 className="font-bold text-blue-800 group-hover:text-blue-900">Análisis de Entropía</h5>
-                                    <div className="text-xs text-blue-600 font-medium">
-                                        {getEntropyAnomalies()} anomalías detectadas
-                                    </div>
-                                </div>
-                            </div>
-                            <p className="text-xs text-blue-700 leading-relaxed mb-3">Detecta anomalías en distribución de categorías</p>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => handleOpenMethodExplanation('entropy')}
-                                    className="flex-1 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs"
-                                >
-                                    <i className="fas fa-info-circle mr-1"></i>
-                                    Explicación
-                                </button>
-                                {getEntropyAnomalies() > 0 && (
-                                    <button
-                                        onClick={() => handleOpenAnomaliesModal('Entropy', 'Anomalías de Entropía')}
-                                        className="flex-1 px-3 py-1 bg-blue-100 text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-200 transition-colors text-xs"
-                                    >
-                                        <i className="fas fa-list mr-1"></i>
-                                        Ver Ítems
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Detección de Fraccionamiento */}
-                        <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl group">
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="h-8 w-8 bg-yellow-600 rounded-lg flex items-center justify-center text-white">
-                                    <i className="fas fa-scissors text-xs"></i>
-                                </div>
-                                <div className="flex-1">
-                                    <h5 className="font-bold text-yellow-800 group-hover:text-yellow-900">Fraccionamiento</h5>
-                                    <div className="text-xs text-yellow-600 font-medium">
-                                        {getSplittingGroups()} grupos de riesgo detectados
-                                    </div>
-                                </div>
-                            </div>
-                            <p className="text-xs text-yellow-700 leading-relaxed mb-3">Identifica transacciones divididas para evadir controles</p>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => handleOpenMethodExplanation('splitting')}
-                                    className="flex-1 px-3 py-1 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-xs"
-                                >
-                                    <i className="fas fa-info-circle mr-1"></i>
-                                    Explicación
-                                </button>
-                                {getSplittingGroups() > 0 && (
-                                    <button
-                                        onClick={() => handleOpenAnomaliesModal('Splitting', 'Anomalías de Fraccionamiento')}
-                                        className="flex-1 px-3 py-1 bg-yellow-100 text-yellow-700 border border-yellow-300 rounded-lg hover:bg-yellow-200 transition-colors text-xs"
-                                    >
-                                        <i className="fas fa-list mr-1"></i>
-                                        Ver Ítems
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Integridad Secuencial */}
-                        <div className="p-4 bg-red-50 border border-red-200 rounded-xl group">
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="h-8 w-8 bg-red-600 rounded-lg flex items-center justify-center text-white">
-                                    <i className="fas fa-barcode text-xs"></i>
-                                </div>
-                                <div className="flex-1">
-                                    <h5 className="font-bold text-red-800 group-hover:text-red-900">Gaps Secuenciales</h5>
-                                    <div className="text-xs text-red-600 font-medium">
-                                        {getSequentialGaps()} gaps de riesgo detectados
-                                    </div>
-                                </div>
-                            </div>
-                            <p className="text-xs text-red-700 leading-relaxed mb-3">Detecta documentos faltantes en secuencias</p>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => handleOpenMethodExplanation('sequential')}
-                                    className="flex-1 px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs"
-                                >
-                                    <i className="fas fa-info-circle mr-1"></i>
-                                    Explicación
-                                </button>
-                                {getSequentialGaps() > 0 && (
-                                    <button
-                                        onClick={() => handleOpenAnomaliesModal('Sequential', 'Gaps Secuenciales')}
-                                        className="flex-1 px-3 py-1 bg-red-100 text-red-700 border border-red-300 rounded-lg hover:bg-red-200 transition-colors text-xs"
-                                    >
-                                        <i className="fas fa-list mr-1"></i>
-                                        Ver Ítems
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Isolation Forest */}
-                        <div className="p-4 bg-purple-50 border border-purple-200 rounded-xl group">
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="h-8 w-8 bg-purple-600 rounded-lg flex items-center justify-center text-white">
-                                    <i className="fas fa-brain text-xs"></i>
-                                </div>
-                                <div className="flex-1">
-                                    <h5 className="font-bold text-purple-800 group-hover:text-purple-900">Isolation Forest</h5>
-                                    <div className="text-xs text-purple-600 font-medium">
-                                        {getIsolationForestAnomalies()} anomalías ML detectadas
-                                    </div>
-                                </div>
-                            </div>
-                            <p className="text-xs text-purple-700 leading-relaxed mb-3">Machine Learning para anomalías multidimensionales</p>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => handleOpenMethodExplanation('isolationForest')}
-                                    className="flex-1 px-3 py-1 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-xs"
-                                >
-                                    <i className="fas fa-info-circle mr-1"></i>
-                                    Explicación
-                                </button>
-                                {getIsolationForestAnomalies() > 0 && (
-                                    <button
-                                        onClick={() => handleOpenAnomaliesModal('IsolationForest', 'Anomalías ML')}
-                                        className="flex-1 px-3 py-1 bg-purple-100 text-purple-700 border border-purple-300 rounded-lg hover:bg-purple-200 transition-colors text-xs"
-                                    >
-                                        <i className="fas fa-list mr-1"></i>
-                                        Ver Ítems
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Actor Profiling */}
-                        <div className="p-4 bg-orange-50 border border-orange-200 rounded-xl group">
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="h-8 w-8 bg-orange-600 rounded-lg flex items-center justify-center text-white">
-                                    <i className="fas fa-user-secret text-xs"></i>
-                                </div>
-                                <div className="flex-1">
-                                    <h5 className="font-bold text-orange-800 group-hover:text-orange-900">Perfilado de Actores</h5>
-                                    <div className="text-xs text-orange-600 font-medium">
-                                        {getSuspiciousActors()} actores sospechosos detectados
-                                    </div>
-                                </div>
-                            </div>
-                            <p className="text-xs text-orange-700 leading-relaxed mb-3">Analiza comportamientos sospechosos de usuarios</p>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => handleOpenMethodExplanation('actorProfiling')}
-                                    className="flex-1 px-3 py-1 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-xs"
-                                >
-                                    <i className="fas fa-info-circle mr-1"></i>
-                                    Explicación
-                                </button>
-                                {getSuspiciousActors() > 0 && (
-                                    <button
-                                        onClick={() => handleOpenAnomaliesModal('ActorProfiling', 'Actores Sospechosos')}
-                                        className="flex-1 px-3 py-1 bg-orange-100 text-orange-700 border border-orange-300 rounded-lg hover:bg-orange-200 transition-colors text-xs"
-                                    >
-                                        <i className="fas fa-list mr-1"></i>
-                                        Ver Ítems
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Enhanced Benford */}
-                        <div className="p-4 bg-green-50 border border-green-200 rounded-xl group">
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="h-8 w-8 bg-green-600 rounded-lg flex items-center justify-center text-white">
-                                    <i className="fas fa-calculator text-xs"></i>
-                                </div>
-                                <div className="flex-1">
-                                    <h5 className="font-bold text-green-800 group-hover:text-green-900">Benford Mejorado</h5>
-                                    <div className="text-xs text-green-600 font-medium">
-                                        {getEnhancedBenfordDeviation().toFixed(1)}% desviación detectada
-                                    </div>
-                                </div>
-                            </div>
-                            <p className="text-xs text-green-700 leading-relaxed mb-3">Análisis avanzado de primer y segundo dígito</p>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => handleOpenMethodExplanation('enhancedBenford')}
-                                    className="flex-1 px-3 py-1 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs"
-                                >
-                                    <i className="fas fa-info-circle mr-1"></i>
-                                    Explicación
-                                </button>
-                                {getEnhancedBenfordDeviation() > 0 && (
-                                    <button
-                                        onClick={() => handleOpenAnomaliesModal('EnhancedBenford', 'Anomalías Benford Mejorado')}
-                                        className="flex-1 px-3 py-1 bg-green-100 text-green-700 border border-green-300 rounded-lg hover:bg-green-200 transition-colors text-xs"
-                                    >
-                                        <i className="fas fa-list mr-1"></i>
-                                        Ver Ítems
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Benford Básico */}
-                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl group">
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
-                                    <i className="fas fa-chart-bar text-xs"></i>
-                                </div>
-                                <div className="flex-1">
-                                    <h5 className="font-bold text-blue-800 group-hover:text-blue-900">Ley de Benford</h5>
-                                    <div className="text-xs text-blue-600 font-medium">
-                                        {getBenfordAnomalyCount()} anomalías detectadas
-                                    </div>
-                                </div>
-                            </div>
-                            <p className="text-xs text-blue-700 leading-relaxed mb-3">Detecta anomalías en primer dígito</p>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => handleOpenMethodExplanation('benford')}
-                                    className="flex-1 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs"
-                                >
-                                    <i className="fas fa-info-circle mr-1"></i>
-                                    Explicación
-                                </button>
-                                {getBenfordAnomalyCount() > 0 && (
-                                    <button
-                                        onClick={() => handleOpenAnomaliesModal('Benford', 'Anomalías Ley de Benford')}
-                                        className="flex-1 px-3 py-1 bg-blue-100 text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-200 transition-colors text-xs"
-                                    >
-                                        <i className="fas fa-list mr-1"></i>
-                                        Ver Ítems
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Duplicados */}
-                        <div className="p-4 bg-red-50 border border-red-200 rounded-xl group">
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="h-8 w-8 bg-red-600 rounded-lg flex items-center justify-center text-white">
-                                    <i className="fas fa-copy text-xs"></i>
-                                </div>
-                                <div className="flex-1">
-                                    <h5 className="font-bold text-red-800 group-hover:text-red-900">Duplicados</h5>
-                                    <div className="text-xs text-red-600 font-medium">
-                                        {analysis?.duplicatesCount || 0} duplicados detectados
-                                    </div>
-                                </div>
-                            </div>
-                            <p className="text-xs text-red-700 leading-relaxed mb-3">Detección inteligente de transacciones repetidas</p>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => handleOpenMethodExplanation('duplicates')}
-                                    className="flex-1 px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs"
-                                >
-                                    <i className="fas fa-info-circle mr-1"></i>
-                                    Explicación
-                                </button>
-                                {(analysis?.duplicatesCount || 0) > 0 && (
-                                    <button
-                                        onClick={() => handleOpenAnomaliesModal('Duplicates', 'Transacciones Duplicadas')}
-                                        className="flex-1 px-3 py-1 bg-red-100 text-red-700 border border-red-300 rounded-lg hover:bg-red-200 transition-colors text-xs"
-                                    >
-                                        <i className="fas fa-list mr-1"></i>
-                                        Ver Ítems
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Outliers */}
-                        <div className="p-4 bg-orange-50 border border-orange-200 rounded-xl group">
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="h-8 w-8 bg-orange-600 rounded-lg flex items-center justify-center text-white">
-                                    <i className="fas fa-expand-arrows-alt text-xs"></i>
-                                </div>
-                                <div className="flex-1">
-                                    <h5 className="font-bold text-orange-800 group-hover:text-orange-900">Valores Atípicos</h5>
-                                    <div className="text-xs text-orange-600 font-medium">
-                                        {analysis?.outliersCount || 0} outliers detectados
-                                    </div>
-                                </div>
-                            </div>
-                            <p className="text-xs text-orange-700 leading-relaxed mb-3">Detecta outliers usando método IQR</p>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => handleOpenMethodExplanation('outliers')}
-                                    className="flex-1 px-3 py-1 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-xs"
-                                >
-                                    <i className="fas fa-info-circle mr-1"></i>
-                                    Explicación
-                                </button>
-                                {(analysis?.outliersCount || 0) > 0 && (
-                                    <button
-                                        onClick={() => handleOpenAnomaliesModal('Outliers', 'Valores Atípicos')}
-                                        className="flex-1 px-3 py-1 bg-orange-100 text-orange-700 border border-orange-300 rounded-lg hover:bg-orange-200 transition-colors text-xs"
-                                    >
-                                        <i className="fas fa-list mr-1"></i>
-                                        Ver Ítems
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
                 {/* Botón de Análisis Forense Completo */}
                 <div className="mt-8 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-2xl p-6">

@@ -52,53 +52,44 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
 
     const checkExistingAndLock = async () => {
         console.log("🔐 checkExistingAndLock iniciado", { selectedPopulation: !!appState.selectedPopulation, loading });
-        
+
         if (!appState.selectedPopulation) {
             console.error("❌ No hay población seleccionada en checkExistingAndLock");
             return;
         }
-        
+
         console.log("✅ Iniciando verificación y bloqueo...");
         setLoading(true);
 
         try {
-            // 🚨 BYPASS TEMPORAL: Saltar verificación de historial para evitar cuelgues
-            console.log("⚠️ BYPASS: Saltando verificación de historial para evitar cuelgues");
-            console.log("🎯 Llamando handleRunSampling(true)...");
-            await handleRunSampling(true);
-            console.log("✅ handleRunSampling completado");
-            return;
-
-            // CÓDIGO ORIGINAL COMENTADO TEMPORALMENTE
-            /*
-            // Usar timeout más corto para verificación de historial
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 segundos
+            // Verificar si existe una muestra actual en esta población
+            console.log("🔍 Verificando historial de muestras...");
 
             const { history } = await samplingProxyFetch('get_history', {
                 population_id: appState.selectedPopulation.id
-            }, { 
-                timeout: 8000,
-                signal: controller.signal 
+            }, {
+                timeout: 10000 // 10 segundos de timeout
             });
 
-            clearTimeout(timeoutId);
-            
+            console.log(`📊 Historial obtenido: ${history?.length || 0} muestras`);
+
+            // Verificar si hay una muestra marcada como "actual"
             const hasCurrent = history && history.some((h: any) => h.is_current);
 
             if (hasCurrent) {
+                console.log("⚠️ Muestra actual detectada, mostrando advertencia de reemplazo");
                 setShowConfirmModal(false);
                 setShowReplaceWarning(true);
                 setLoading(false);
             } else {
+                console.log("✅ No hay muestra actual, procediendo directamente");
                 await handleRunSampling(true);
             }
-            */
         } catch (err: any) {
             let errorMessage = "Error al verificar historial";
-            
+
             if (err.name === 'AbortError') {
-                errorMessage = "Operación cancelada por timeout (15s)";
+                errorMessage = "Operación cancelada por timeout";
             } else if (err instanceof FetchTimeoutError) {
                 errorMessage = "Timeout: La consulta tardó demasiado. Verifique su conexión.";
             } else if (err instanceof FetchNetworkError) {
@@ -106,7 +97,8 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
             } else {
                 errorMessage += ": " + (err.message || "Error desconocido");
             }
-            
+
+            console.error("❌ Error en verificación de historial:", errorMessage);
             addToast(errorMessage, 'error');
             setLoading(false);
         }
@@ -114,18 +106,18 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
 
     const handleRunSampling = async (isFinal: boolean, manualAllocations?: Record<string, number>) => {
         console.log("🚀 handleRunSampling iniciado", { isFinal, loading, selectedPopulation: !!appState.selectedPopulation });
-        
+
         if (!appState.selectedPopulation) {
             console.error("❌ No hay población seleccionada");
             return;
         }
-        
+
         // 🔒 PROTECCIÓN CRÍTICA: Evitar múltiples ejecuciones
         if (loading) {
             console.warn("⚠️ Ejecución ya en progreso, ignorando click adicional");
             return;
         }
-        
+
         console.log("✅ Iniciando proceso de muestreo...");
         setLoading(true);
         setShowConfirmModal(false);
@@ -147,9 +139,9 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
             console.log("🌐 Iniciando carga de datos (versión anti-bucle)...");
             console.log("⏰ Inicio:", new Date().toLocaleString());
             console.log("🎯 Método:", appState.samplingMethod);
-            
+
             const expectedRows = appState.selectedPopulation.total_rows || 1500;
-            
+
             // Advertencia específica para MUS
             if (appState.samplingMethod === "mus" && appState.samplingParams?.mus?.TE < 50000) {
                 console.warn("⚠️ MUS: TE muy pequeño puede causar problemas");
@@ -163,10 +155,10 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
 
             // SOLUCIÓN AL BUCLE INFINITO: Límites estrictos y validación
             const startTime = Date.now();
-            
+
             const { rows: realRows } = await samplingProxyFetch('get_universe', {
                 population_id: appState.selectedPopulation.id
-            }, { 
+            }, {
                 timeout: 10000 // Timeout reducido a 10 segundos
             });
 
@@ -192,16 +184,16 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
             // Aplicar límite de seguridad SIEMPRE
             const SAFETY_LIMIT = 15000; // Límite más conservador
             let limitedRows = realRows.slice(0, SAFETY_LIMIT);
-            
+
             if (realRows.length > SAFETY_LIMIT) {
                 addToast(`Población limitada a ${SAFETY_LIMIT} registros para evitar bucles infinitos (original: ${realRows.length}).`, 'warning');
                 console.warn(`⚠️ Población limitada: ${realRows.length} → ${limitedRows.length} registros`);
             }
 
             // Validar que los datos no están corruptos
-            const validRows = limitedRows.filter(row => 
-                row && 
-                typeof row === 'object' && 
+            const validRows = limitedRows.filter(row =>
+                row &&
+                typeof row === 'object' &&
                 row.unique_id_col !== undefined &&
                 typeof row.monetary_value_col === 'number'
             );
@@ -225,12 +217,12 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
             // PROTECCIÓN ADICIONAL: Timeout para calculateSampleSize
             const calcStartTime = Date.now();
             let results;
-            
+
             try {
                 results = calculateSampleSize(currentAppState, limitedRows);
                 const calcTime = Date.now() - calcStartTime;
                 console.log(`⚡ Cálculo completado en ${calcTime}ms`);
-                
+
                 if (calcTime > 10000) { // Más de 10 segundos es sospechoso
                     console.warn(`⚠️ Cálculo lento detectado: ${calcTime}ms`);
                 }
@@ -245,11 +237,11 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
             // 🎯 SOLUCIÓN DEFINITIVA: Guardado inteligente según entorno (RLS corregido)
             const isDevelopment = window.location.hostname === 'localhost';
             const forceSkipSave = localStorage.getItem('SKIP_SAVE_MODE') === 'true';
-            
+
             // En producción, SIEMPRE intentar guardar (RLS ya corregido)
             // En desarrollo, usar modo emergencia solo si está activado manualmente
             const shouldSkipSave = isDevelopment && forceSkipSave;
-            
+
             if (shouldSkipSave || !isFinal) {
                 console.log("🚨 MODO SIN GUARDADO: Saltando persistencia en BD");
                 if (shouldSkipSave) {
@@ -257,7 +249,7 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                 } else if (!isFinal) {
                     addToast("Modo simulación: Muestra temporal generada", "info");
                 }
-                
+
                 setAppState(prev => {
                     const currentMethodResults = {
                         ...results,
@@ -294,7 +286,7 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                     };
 
                     console.log("🔄 Guardando muestra con estrategia híbrida...");
-                    
+
                     // ✅ FIX CRÍTICO: Usar samplingProxyFetch con manejo robusto de errores
                     let savedSample;
                     try {
@@ -310,7 +302,7 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                             },
                             is_final: true
                         };
-                        
+
                         console.log("📤 Datos a guardar:", {
                             population_id: saveData.population_id,
                             method: saveData.method,
@@ -318,28 +310,28 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                             sample_size: saveData.sample_data.sample_size,
                             objective: saveData.sample_data.objective.substring(0, 50) + '...'
                         });
-                        
+
                         savedSample = await samplingProxyFetch('save_sample', saveData);
-                        
+
                         console.log(`✅ Guardado completado exitosamente:`, savedSample);
-                        
+
                         // Verificar que la respuesta sea válida
                         if (!savedSample || !savedSample.id) {
                             throw new Error('Respuesta inválida del servidor: falta ID de muestra');
                         }
-                        
+
                         // 🔍 VERIFICACIÓN ADICIONAL: Confirmar que se guardó en la BD
                         console.log("🔍 Verificando persistencia en BD...");
                         try {
                             // Esperar un momento para que se propague
                             await new Promise(resolve => setTimeout(resolve, 500));
-                            
+
                             const historyCheck = await samplingProxyFetch('get_history', {
                                 population_id: appState.selectedPopulation.id
                             });
-                            
+
                             const foundSample = historyCheck.history?.find(h => h.id === savedSample.id);
-                            
+
                             if (foundSample) {
                                 console.log("✅ PERSISTENCIA CONFIRMADA: Muestra encontrada en historial");
                                 console.log("📄 Detalles:", {
@@ -351,7 +343,7 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                             } else {
                                 console.warn("⚠️ ADVERTENCIA: Muestra no encontrada en historial inmediatamente");
                                 console.warn("💡 Esto puede ser normal debido a propagación de BD");
-                                
+
                                 // Marcar como temporal si no se encuentra
                                 savedSample.persistence_warning = true;
                             }
@@ -359,32 +351,37 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                             console.warn("⚠️ No se pudo verificar persistencia:", verifyError.message);
                             savedSample.persistence_warning = true;
                         }
-                        
-                        // 🚨 DETECCIÓN AUTOMÁTICA DE PROBLEMA RLS
+
+                        // 🚨 DETECCIÓN AUTOMÁTICA DE PROBLEMA RLS (DESACTIVADA)
+                        // ⚠️ NOTA: Esta detección automática era demasiado agresiva y se activaba
+                        // incluso cuando el guardado era exitoso, causando que NO se guardaran
+                        // muestras subsecuentes. Se desactiva para permitir guardado normal.
+                        /*
                         if (savedSample.persistence_warning || !foundSample) {
                             console.log("🚨 DETECTADO: Posible problema RLS en audit_historical_samples");
                             console.log("💡 ACTIVANDO MODO DE EMERGENCIA AUTOMÁTICO...");
-                            
+
                             // Activar modo emergencia automáticamente
                             localStorage.setItem('SKIP_SAVE_MODE', 'true');
                             localStorage.setItem('EMERGENCY_REASON', 'RLS_AUTO_DETECTED');
                             localStorage.setItem('EMERGENCY_TIMESTAMP', Date.now().toString());
-                            
+
                             console.log("✅ Modo emergencia activado - próximas muestras se guardarán solo en memoria");
-                            
+
                             // Mostrar instrucciones al usuario
                             if (window.addToast) {
                                 addToast("⚠️ Problema de BD detectado. Contacte al administrador. Modo emergencia activado.", "warning");
                             }
                         }
-                        
+                        */
+
                     } catch (saveError) {
                         console.error("❌ Error detallado en guardado:", saveError);
-                        
+
                         // Análisis específico del error para mejor diagnóstico
                         let errorMessage = "Error al guardar la muestra";
                         let shouldContinue = false;
-                        
+
                         if (saveError.message?.includes('RLS') || saveError.message?.includes('permission')) {
                             errorMessage = "Error de permisos en base de datos. La muestra se guardará solo en memoria.";
                             shouldContinue = true;
@@ -398,11 +395,11 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                             errorMessage = "Error de datos: campos requeridos faltantes";
                             shouldContinue = false;
                         }
-                        
+
                         if (shouldContinue) {
                             console.log("⚠️ Continuando sin guardado en BD debido a:", saveError.message);
                             addToast(errorMessage, "warning");
-                            
+
                             // Crear un ID temporal para continuar
                             savedSample = {
                                 id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -422,11 +419,11 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                             method: prev.samplingMethod,
                             sampling_params: prev.samplingParams
                         };
-                        
+
                         // Determinar si está bloqueado basado en si se guardó exitosamente
                         const isLocked = savedSample && savedSample.id && !savedSample.id.startsWith('temp-');
                         const isCurrentVersion = isLocked;
-                        
+
                         return {
                             ...prev,
                             results,
@@ -440,9 +437,9 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                             }
                         };
                     });
-                    
+
                     console.log("✅ Estado actualizado correctamente");
-                    
+
                     // Mensaje de éxito apropiado basado en persistencia real
                     if (savedSample && savedSample.id && !savedSample.id.startsWith('temp-')) {
                         if (savedSample.persistence_warning) {
@@ -455,10 +452,10 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                     }
                 } catch (saveError) {
                     console.error("❌ Error al guardar:", saveError);
-                    
+
                     // 🔧 FALLBACK: Si falla el guardado, continuar sin guardar
                     addToast("Advertencia: No se pudo guardar en base de datos, pero la muestra se generó correctamente", "warning");
-                    
+
                     setAppState(prev => {
                         const currentMethodResults = {
                             ...results,
@@ -477,25 +474,25 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
                             }
                         };
                     });
-                    
+
                     console.log("⚠️ Continuando sin guardar en BD");
                 }
             }
-            
+
             const totalTime = Date.now() - startTime;
             console.log(`🎉 Proceso completado en ${totalTime}ms`);
-            
+
             // 🔧 FIX: setLoading(false) ANTES de onComplete() para evitar botón pegado
             setLoading(false);
             console.log("🎯 Llamando onComplete()...");
             onComplete();
             console.log("✅ onComplete() ejecutado exitosamente");
-            
+
         } catch (error) {
             console.error("Error en flujo de muestreo:", error);
-            
+
             let errorMessage = "Error inesperado en el proceso";
-            
+
             if (error instanceof FetchTimeoutError) {
                 errorMessage = "Timeout: La operación tardó más de 30 segundos. Intente con una población más pequeña.";
             } else if (error instanceof FetchNetworkError) {
@@ -509,7 +506,7 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
             } else {
                 errorMessage = error?.message || errorMessage;
             }
-            
+
             addToast(`ERROR: ${errorMessage}`, 'error');
         } finally {
             // 🔧 Solo resetear loading si no se ejecutó onComplete() exitosamente
@@ -517,7 +514,7 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
         }
     };
 
-const onLoadHistory = (sample: HistoricalSample) => {
+    const onLoadHistory = (sample: HistoricalSample) => {
         setAppState(prev => ({
             ...prev,
             samplingMethod: sample.method,
@@ -529,7 +526,7 @@ const onLoadHistory = (sample: HistoricalSample) => {
             isCurrentVersion: sample.is_current,
             historyId: sample.id
         }));
-        
+
         // 🔧 FIX: Asegurar que loading se resetee antes de cambiar vista
         setLoading(false);
         onComplete();
@@ -538,6 +535,7 @@ const onLoadHistory = (sample: HistoricalSample) => {
     if (viewHistory && appState.selectedPopulation) {
         return <SampleHistoryManager
             populationId={appState.selectedPopulation.id}
+            currentMethod={currentMethod}
             onLoadSample={onLoadHistory}
             onBack={() => setViewHistory(false)}
         />;
@@ -653,16 +651,15 @@ const onLoadHistory = (sample: HistoricalSample) => {
                                     addToast("Modo emergencia activado - Sin guardado en BD", "warning");
                                 }
                             }}
-                            className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
-                                localStorage.getItem('SKIP_SAVE_MODE') === 'true' 
-                                    ? 'bg-red-500 text-white' 
-                                    : 'bg-gray-200 text-gray-600 hover:bg-red-100'
-                            }`}
+                            className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${localStorage.getItem('SKIP_SAVE_MODE') === 'true'
+                                ? 'bg-red-500 text-white'
+                                : 'bg-gray-200 text-gray-600 hover:bg-red-100'
+                                }`}
                         >
                             🚨 {localStorage.getItem('SKIP_SAVE_MODE') === 'true' ? 'MODO EMERGENCIA ON' : 'Activar Emergencia'}
                         </button>
                     )}
-                    
+
                     {appState.results && (
                         <button
                             onClick={onComplete}
@@ -755,7 +752,7 @@ const onLoadHistory = (sample: HistoricalSample) => {
                                 </div>
                             </div>
                             <p className="text-amber-800 leading-relaxed text-sm font-medium">
-                                El <span className="font-black">Muestreo Estratificado</span> con poblaciones superiores a 1,000 registros requiere cálculos intensivos de asignación óptima (Algoritmo de Neyman). 
+                                El <span className="font-black">Muestreo Estratificado</span> con poblaciones superiores a 1,000 registros requiere cálculos intensivos de asignación óptima (Algoritmo de Neyman).
                                 El tiempo estimado de procesamiento es de <span className="font-black text-amber-900">30 a 60 segundos</span>.
                             </p>
                         </div>
@@ -795,8 +792,8 @@ const onLoadHistory = (sample: HistoricalSample) => {
                         <div className="flex items-start gap-3">
                             <i className="fas fa-info-circle text-slate-400 mt-1"></i>
                             <p className="text-xs text-slate-600 leading-relaxed">
-                                <span className="font-black text-slate-800">Nota Técnica:</span> Si decide continuar con Estratificado, 
-                                el sistema ejecutará el cálculo completo. No cierre el navegador durante el proceso. 
+                                <span className="font-black text-slate-800">Nota Técnica:</span> Si decide continuar con Estratificado,
+                                el sistema ejecutará el cálculo completo. No cierre el navegador durante el proceso.
                                 Recibirá una notificación al completarse.
                             </p>
                         </div>

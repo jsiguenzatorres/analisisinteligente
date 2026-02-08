@@ -1,17 +1,16 @@
 /**
- * 🗄️ SERVICIO DE ALMACENAMIENTO DE MUESTRAS - MODO EMERGENCIA
+ * 🗄️ SERVICIO DE ALMACENAMIENTO DE MUESTRAS
  * 
- * ⚠️ IMPORTANTE: Este servicio NO guarda en base de datos para evitar problemas de RLS.
- * Los datos se mantienen solo en memoria del navegador durante la sesión.
+ * ✅ Guardado persistente en Supabase habilitado
+ * ✅ Usa anon_key (seguro, no expone service_role_key)
+ * ✅ Compatible con políticas RLS configuradas
  * 
- * RAZÓN: No podemos exponer el service_role_key en el cliente por seguridad.
- * 
- * SOLUCIONES PARA HABILITAR GUARDADO EN BD:
- * 1. Desplegar Edge Function de Supabase (ver DESPLIEGUE_EDGE_FUNCTION.md)
- * 2. Crear endpoint API en backend con service_role_key
- * 3. Configurar RLS policies correctamente en Supabase
+ * REQUISITOS:
+ * - Ejecutar script: fix_rls_samples.sql en Supabase
+ * - Políticas RLS deben estar configuradas
  */
 
+import { supabase } from './supabaseClient';
 import { AuditResults, SamplingMethod } from '../types';
 
 export interface SampleStorageData {
@@ -29,68 +28,126 @@ export interface SampleStorageData {
 export interface SaveSampleResult {
     id: string;
     created_at: string;
-    method: 'emergency_mode';
+    method: string;
     duration_ms: number;
 }
 
 /**
- * 🚨 MODO EMERGENCIA: Guardado solo en memoria
+ * 💾 GUARDAR MUESTRA EN SUPABASE
  * 
- * Los datos se guardan en el estado de React pero NO en la base de datos.
- * Esto permite que la aplicación funcione sin problemas de RLS.
+ * Guarda la muestra generada en la tabla audit_historical_samples
+ * usando el cliente de Supabase con anon_key (seguro)
  */
 export async function saveSample(data: SampleStorageData): Promise<SaveSampleResult> {
-    console.log('🚨 MODO EMERGENCIA ACTIVO');
-    console.log('📝 Guardando muestra solo en memoria (NO en base de datos)');
+    console.log('💾 Guardando muestra en base de datos...');
     console.log(`   Población: ${data.population_id}`);
     console.log(`   Método: ${data.method}`);
     console.log(`   Tamaño: ${data.sample_size} ítems`);
     
     const startTime = Date.now();
     
-    // Simular un pequeño delay para UX
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // Generar ID temporal único
-    const mockId = `emergency-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const duration = Date.now() - startTime;
-    
-    console.log(`✅ Muestra guardada en memoria (${duration}ms)`);
-    console.log(`   ID temporal: ${mockId}`);
-    console.warn('⚠️ ADVERTENCIA: Los datos NO se guardaron en base de datos');
-    console.warn('⚠️ Los datos se perderán al recargar la página');
-    console.warn('⚠️ Para habilitar guardado persistente, ver: DESPLIEGUE_EDGE_FUNCTION.md');
-    
-    return {
-        id: mockId,
-        created_at: new Date().toISOString(),
-        method: 'emergency_mode',
-        duration_ms: duration
-    };
+    try {
+        // Guardar en Supabase usando anon_key (seguro)
+        const { data: savedSample, error } = await supabase
+            .from('audit_historical_samples')
+            .insert({
+                population_id: data.population_id,
+                method: data.method,
+                objective: data.objective,
+                seed: data.seed,
+                sample_size: data.sample_size,
+                params_snapshot: data.params_snapshot,
+                results_snapshot: data.results_snapshot,
+                is_final: data.is_final,
+                is_current: data.is_current
+            })
+            .select('id, created_at')
+            .single();
+        
+        if (error) {
+            console.error('❌ Error guardando muestra:', error);
+            console.error('   Código:', error.code);
+            console.error('   Mensaje:', error.message);
+            console.error('   Detalles:', error.details);
+            throw new Error(`Error al guardar muestra: ${error.message}`);
+        }
+        
+        const duration = Date.now() - startTime;
+        console.log(`✅ Muestra guardada exitosamente en ${duration}ms`);
+        console.log(`   ID: ${savedSample.id}`);
+        console.log(`   Fecha: ${savedSample.created_at}`);
+        
+        return {
+            id: savedSample.id,
+            created_at: savedSample.created_at,
+            method: data.method,
+            duration_ms: duration
+        };
+    } catch (error: any) {
+        console.error('❌ Error crítico al guardar muestra:', error);
+        throw error;
+    }
 }
 
 /**
- * 🔍 VERIFICAR MUESTRA (MODO EMERGENCIA)
+ * 🔍 VERIFICAR MUESTRA GUARDADA
  * 
- * En modo emergencia, siempre retorna true ya que no hay BD que verificar
+ * Verifica que la muestra existe en la base de datos
  */
 export async function verifySavedSample(sampleId: string): Promise<boolean> {
-    console.log('🚨 MODO EMERGENCIA: Verificación simulada');
-    return true;
+    console.log('🔍 Verificando muestra guardada...');
+    
+    try {
+        const { data, error } = await supabase
+            .from('audit_historical_samples')
+            .select('id')
+            .eq('id', sampleId)
+            .single();
+        
+        if (error || !data) {
+            console.error('❌ Muestra no encontrada:', error?.message || 'No data');
+            return false;
+        }
+        
+        console.log('✅ Muestra verificada exitosamente');
+        return true;
+    } catch (error) {
+        console.error('❌ Error verificando muestra:', error);
+        return false;
+    }
 }
 
 /**
- * 📊 ESTADÍSTICAS (MODO EMERGENCIA)
+ * 📊 OBTENER ESTADÍSTICAS DE MUESTRAS
  * 
- * En modo emergencia, no hay estadísticas disponibles
+ * Retorna el historial de muestras guardadas para una población
  */
 export async function getSaveStatistics(populationId: string) {
-    console.log('🚨 MODO EMERGENCIA: Estadísticas no disponibles');
-    return { 
-        total: 0, 
-        samples: [], 
-        lastSaved: null 
-    };
+    console.log('📊 Obteniendo estadísticas de muestras...');
+    
+    try {
+        const { data, error } = await supabase
+            .from('audit_historical_samples')
+            .select('id, method, sample_size, created_at, is_final, is_current')
+            .eq('population_id', populationId)
+            .order('created_at', { ascending: false });
+        
+        if (error) {
+            console.error('❌ Error obteniendo estadísticas:', error);
+            return { total: 0, samples: [], lastSaved: null };
+        }
+        
+        console.log(`✅ Estadísticas obtenidas: ${data.length} muestras`);
+        
+        return {
+            total: data.length,
+            samples: data,
+            lastSaved: data[0]?.created_at || null
+        };
+    } catch (error) {
+        console.error('❌ Error en getSaveStatistics:', error);
+        return { total: 0, samples: [], lastSaved: null };
+    }
 }
 
 export default {

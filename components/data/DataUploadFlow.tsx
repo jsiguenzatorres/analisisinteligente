@@ -137,8 +137,8 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
 
             addLog("📊 Estadísticas calculadas.");
 
-            // 1. Crear registro de Población con retry logic para cold starts
-            addLog("🚀 Enviando población a Backend...");
+            // 1. Crear registro de Población DIRECTAMENTE con Supabase (sin Vercel proxy)
+            addLog("🚀 Creando población en Supabase...");
 
             const popPayload = {
                 file_name: populationName || file.name,
@@ -153,72 +153,23 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                 user_id: user.id
             };
 
-            // Retry logic para manejar cold starts y timeouts
-            let populationId: string | null = null;
-            let createPopRetries = 0;
-            const MAX_CREATE_POP_RETRIES = 3;
+            const { data: popData, error: popError } = await supabase
+                .from('audit_populations')
+                .insert([popPayload])
+                .select()
+                .single();
 
-            while (!populationId && createPopRetries < MAX_CREATE_POP_RETRIES) {
-                try {
-                    if (createPopRetries > 0) {
-                        addLog(`⏳ Reintentando crear población (intento ${createPopRetries + 1}/${MAX_CREATE_POP_RETRIES})...`);
-                    } else {
-                        addLog("⏳ Primera llamada puede tardar 30-60s (cold start del servidor)...");
-                    }
-
-                    // Timeout de 90 segundos para cold start
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 90000);
-
-                    const popRes = await fetch('/api/create_population', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(popPayload),
-                        signal: controller.signal
-                    });
-
-                    clearTimeout(timeoutId);
-
-                    if (!popRes.ok) {
-                        const errText = await popRes.text();
-                        throw new Error(`Status ${popRes.status}: ${errText}`);
-                    }
-
-                    const popData = await popRes.json();
-                    populationId = popData.id;
-                    addLog(`✅ Población creada en Server (ID: ${populationId})`);
-
-                } catch (popErr: any) {
-                    createPopRetries++;
-                    console.warn(`Create population attempt ${createPopRetries} failed:`, popErr);
-
-                    // Solo mostrar en UI si NO es el último intento (aún hay esperanza)
-                    if (createPopRetries < MAX_CREATE_POP_RETRIES) {
-                        if (popErr.name === 'AbortError') {
-                            addLog(`⏳ Timeout detectado. Reintentando automáticamente...`);
-                        } else {
-                            addLog(`⏳ Reintentando conexión con el servidor...`);
-                        }
-
-                        // Esperar antes de reintentar (backoff exponencial: 2s, 4s, 8s)
-                        const waitTime = 2000 * Math.pow(2, createPopRetries - 1);
-                        addLog(`⏳ Esperando ${waitTime / 1000}s antes de reintentar...`);
-                        await new Promise(resolve => setTimeout(resolve, waitTime));
-                    } else {
-                        // Solo mostrar error si ya agotamos todos los reintentos
-                        throw new Error(`No se pudo crear población tras ${MAX_CREATE_POP_RETRIES} intentos: ${popErr.message}`);
-                    }
-                }
+            if (popError) {
+                throw new Error(`Error al crear población: ${popError.message}`);
             }
 
-            if (!populationId) {
-                throw new Error("No se pudo obtener ID de población");
-            }
-            addLog(`⏩ Iniciando carga de ${data.length} filas vía Backend...`);
+            const populationId = popData.id;
+            addLog(`✅ Población creada (ID: ${populationId})`);
+            addLog(`⏩ Iniciando carga de ${data.length} filas DIRECTO a Supabase...`);
 
-            // 2. Preparar y subir datos por lotes (Batching) - BACKEND PROXY
-            // Ajustamos lote a 25 para evitar Timeouts y errores de red
-            const BATCH_SIZE = 25;
+            // 2. Preparar y subir datos por lotes DIRECTAMENTE a Supabase (sin proxy)
+            // Aumentamos tamaño de lote a 100 ya que no hay límite de Vercel
+            const BATCH_SIZE = 100;
             const batches = [];
 
             for (let i = 0; i < data.length; i += BATCH_SIZE) {
@@ -233,13 +184,13 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                 batches.push(chunk);
             }
 
-            addLog(`📦 Enviando ${batches.length} lotes al Backend (Batch Size: ${BATCH_SIZE})...`);
+            addLog(`📦 Subiendo ${batches.length} lotes a Supabase (Batch Size: ${BATCH_SIZE})...`);
 
-            // Enviamos lotes SECUENCIALMENTE para evitar saturar la red/firewall y detectar errores específicos
+            // Enviamos lotes SECUENCIALMENTE con retry
             let completedBatches = 0;
 
             for (const [idx, batch] of batches.entries()) {
-                addLog(`⏳ Subiendo lote ${idx + 1} de ${batches.length} (${batch.length} filas)...`);
+                addLog(`⏳ Lote ${idx + 1}/${batches.length} (${batch.length} filas)...`);
 
                 let batchSuccess = false;
                 let batchRetries = 0;
@@ -247,28 +198,25 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
 
                 while (!batchSuccess && batchRetries < MAX_BATCH_RETRIES) {
                     try {
-                        const res = await fetch('/api/sampling_proxy?action=sync_chunk', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ rows: batch })
-                        });
+                        const { error: batchError } = await supabase
+                            .from('audit_data_rows')
+                            .insert(batch);
 
-                        if (!res.ok) {
-                            const errText = await res.text();
-                            throw new Error(`Status ${res.status}: ${errText}`);
+                        if (batchError) {
+                            throw batchError;
                         }
 
                         batchSuccess = true;
 
                     } catch (batchErr: any) {
                         batchRetries++;
-                        console.warn(`Batch ${idx + 1} failed (Attempt ${batchRetries}/${MAX_BATCH_RETRIES}). Retrying...`, batchErr);
+                        console.warn(`Batch ${idx + 1} failed (Attempt ${batchRetries}/${MAX_BATCH_RETRIES})`, batchErr);
 
                         if (batchRetries >= MAX_BATCH_RETRIES) {
                             throw new Error(`Fallo en lote ${idx + 1} tras ${MAX_BATCH_RETRIES} intentos: ${batchErr.message}`);
                         }
 
-                        const waitTime = 1000 * Math.pow(2, batchRetries - 1);
+                        const waitTime = 1000 * batchRetries;
                         addLog(`⚠️ Reintentando lote ${idx + 1} en ${waitTime / 1000}s...`);
                         await new Promise(resolve => setTimeout(resolve, waitTime));
                     }
@@ -278,8 +226,8 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                 const progress = Math.round(((idx + 1) / batches.length) * 100);
                 setUploadProgress(progress);
 
-                // Pausa de 800ms para evitar WAF/Rate Limiting (aprox 3750 filas/minuto)
-                await new Promise(resolve => setTimeout(resolve, 800));
+                // Pequeña pausa para no saturar (opcional, Supabase maneja bien el rate limiting)
+                await new Promise(resolve => setTimeout(resolve, 200));
             }
 
             // Validación final de conteo
@@ -287,7 +235,7 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                 throw new Error("No se completaron todos los lotes.");
             }
 
-            addLog("✅ Carga Completada (Backend Proxy).");
+            addLog("✅ Carga Completada (Supabase Directo - Sin Timeouts).");
 
             // 3. Finalizar Inmediatamente
             onComplete(populationId);
@@ -449,7 +397,7 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                         {/* Header con icono y título */}
                         <div className="relative bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 p-8 text-center">
                             <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMC41IiBvcGFjaXR5PSIwLjEiLz48L3BhdHRlcm4+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9InVybCgjZ3JpZCkiLz48L3N2Zz4=')] opacity-20"></div>
-                            
+
                             <div className="relative z-10">
                                 {/* Icono animado */}
                                 <div className="mb-6 flex justify-center">
@@ -487,7 +435,7 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                                     </span>
                                 </div>
                                 <div className="relative w-full bg-slate-200 rounded-full h-4 shadow-inner overflow-hidden">
-                                    <div 
+                                    <div
                                         className="absolute inset-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-500 h-full transition-all duration-500 ease-out"
                                         style={{ width: `${uploadProgress}%` }}
                                     >
@@ -496,9 +444,9 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                                 </div>
                                 <p className="text-xs text-slate-500 mt-2 text-center font-medium">
                                     {uploadProgress < 30 ? 'Validando estructura de datos...' :
-                                     uploadProgress < 60 ? 'Procesando registros...' :
-                                     uploadProgress < 90 ? 'Calculando estadísticas...' :
-                                     'Finalizando carga...'}
+                                        uploadProgress < 60 ? 'Procesando registros...' :
+                                            uploadProgress < 90 ? 'Calculando estadísticas...' :
+                                                'Finalizando carga...'}
                                 </p>
                             </div>
 
@@ -523,37 +471,34 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                                             const isSuccess = log.includes('✅') || log.includes('Completada');
                                             const isWarning = log.includes('⚠️') || log.includes('Reintentando');
                                             const isInfo = log.includes('📊') || log.includes('🚀') || log.includes('💾');
-                                            
+
                                             return (
-                                                <div 
-                                                    key={i} 
-                                                    className={`group flex items-start gap-3 p-3 rounded-xl transition-all duration-300 hover:scale-[1.02] ${
-                                                        isError ? 'bg-red-500/10 border border-red-500/20' :
-                                                        isSuccess ? 'bg-emerald-500/10 border border-emerald-500/20' :
-                                                        isWarning ? 'bg-yellow-500/10 border border-yellow-500/20' :
-                                                        isInfo ? 'bg-blue-500/10 border border-blue-500/20' :
-                                                        'bg-slate-800/50 border border-slate-700/50'
-                                                    }`}
+                                                <div
+                                                    key={i}
+                                                    className={`group flex items-start gap-3 p-3 rounded-xl transition-all duration-300 hover:scale-[1.02] ${isError ? 'bg-red-500/10 border border-red-500/20' :
+                                                            isSuccess ? 'bg-emerald-500/10 border border-emerald-500/20' :
+                                                                isWarning ? 'bg-yellow-500/10 border border-yellow-500/20' :
+                                                                    isInfo ? 'bg-blue-500/10 border border-blue-500/20' :
+                                                                        'bg-slate-800/50 border border-slate-700/50'
+                                                        }`}
                                                 >
                                                     {/* Número de línea */}
-                                                    <span className={`flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black ${
-                                                        isError ? 'bg-red-500/20 text-red-400' :
-                                                        isSuccess ? 'bg-emerald-500/20 text-emerald-400' :
-                                                        isWarning ? 'bg-yellow-500/20 text-yellow-400' :
-                                                        isInfo ? 'bg-blue-500/20 text-blue-400' :
-                                                        'bg-slate-700 text-slate-400'
-                                                    }`}>
+                                                    <span className={`flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black ${isError ? 'bg-red-500/20 text-red-400' :
+                                                            isSuccess ? 'bg-emerald-500/20 text-emerald-400' :
+                                                                isWarning ? 'bg-yellow-500/20 text-yellow-400' :
+                                                                    isInfo ? 'bg-blue-500/20 text-blue-400' :
+                                                                        'bg-slate-700 text-slate-400'
+                                                        }`}>
                                                         {String(i + 1).padStart(2, '0')}
                                                     </span>
-                                                    
+
                                                     {/* Contenido del log */}
-                                                    <span className={`flex-1 text-sm font-mono leading-relaxed ${
-                                                        isError ? 'text-red-300' :
-                                                        isSuccess ? 'text-emerald-300' :
-                                                        isWarning ? 'text-yellow-300' :
-                                                        isInfo ? 'text-blue-300' :
-                                                        'text-slate-300'
-                                                    }`}>
+                                                    <span className={`flex-1 text-sm font-mono leading-relaxed ${isError ? 'text-red-300' :
+                                                            isSuccess ? 'text-emerald-300' :
+                                                                isWarning ? 'text-yellow-300' :
+                                                                    isInfo ? 'text-blue-300' :
+                                                                        'text-slate-300'
+                                                        }`}>
                                                         {log}
                                                     </span>
 
@@ -583,7 +528,7 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                                     </div>
                                     <p className="text-sm text-indigo-700 font-medium">Procesando...</p>
                                 </div>
-                                
+
                                 <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl p-4 border border-emerald-100">
                                     <div className="flex items-center gap-2 mb-1">
                                         <i className="fas fa-shield-alt text-emerald-600 text-sm"></i>
@@ -591,7 +536,7 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                                     </div>
                                     <p className="text-sm text-emerald-700 font-medium">Conexión cifrada</p>
                                 </div>
-                                
+
                                 <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 border border-purple-100">
                                     <div className="flex items-center gap-2 mb-1">
                                         <i className="fas fa-database text-purple-600 text-sm"></i>

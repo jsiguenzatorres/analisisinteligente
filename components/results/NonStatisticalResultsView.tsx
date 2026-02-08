@@ -89,19 +89,19 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
     const getRiskLevel = (riskScore: number, riskFactors: string[]): 'Alto' | 'Medio' | 'Bajo' => {
         // Si tiene factores de riesgo críticos, es Alto independientemente del score
         const criticalFactors = ['benford', 'outlier', 'duplicado', 'splitting', 'gap', 'isolation', 'ml_anomaly'];
-        const hasCriticalFactor = riskFactors && riskFactors.some(f => 
+        const hasCriticalFactor = riskFactors && riskFactors.some(f =>
             criticalFactors.some(cf => f.toLowerCase().includes(cf))
         );
-        
+
         // Si tiene 3+ factores de riesgo, es Alto
         if (riskFactors && riskFactors.length >= 3) return 'Alto';
-        
+
         // Si tiene 2+ factores o 1 factor crítico, es Alto
         if ((riskFactors && riskFactors.length >= 2) || hasCriticalFactor) return 'Alto';
-        
+
         // Si tiene 1 factor no crítico, es Medio
         if (riskFactors && riskFactors.length === 1) return 'Medio';
-        
+
         // Fallback al score solo si no hay factores
         if (riskScore > 80) return 'Alto';
         if (riskScore > 50) return 'Medio';
@@ -110,7 +110,7 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
 
     const getAnalysisType = (riskFactors: string[]): string => {
         if (!riskFactors || riskFactors.length === 0) return 'Otros';
-        
+
         const typeMap: { [key: string]: string } = {
             'benford': 'Ley de Benford',
             'enhanced_benford': 'Benford Avanzado',
@@ -131,7 +131,7 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
             'ampliación': 'Ampliación de Muestra',
             'fase': 'Ampliación de Muestra'
         };
-        
+
         for (const factor of riskFactors) {
             const lowerFactor = factor.toLowerCase();
             for (const [key, value] of Object.entries(typeMap)) {
@@ -140,30 +140,30 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                 }
             }
         }
-        
+
         return 'Otros';
     };
 
     const getCategoryFromItem = (item: AuditSampleItem): string | null => {
         if (!appState.selectedPopulation?.column_mapping) return null;
-        
+
         const categoryField = appState.selectedPopulation.column_mapping.category;
         if (!categoryField) return null;
-        
+
         try {
             // Intentar primero con raw_row, luego con el item directamente
             let rawData = item.raw_row;
-            
+
             if (typeof rawData === 'string') {
                 rawData = JSON.parse(rawData);
             }
-            
+
             // Si raw_row no existe o no tiene la categoría, buscar en el item directamente
             if (!rawData || !rawData[categoryField]) {
                 // Buscar en el item directamente usando el nombre del campo
                 return item[categoryField as keyof AuditSampleItem] as string || null;
             }
-            
+
             return rawData[categoryField] || null;
         } catch (error) {
             console.warn('Error extrayendo categoría:', error);
@@ -173,12 +173,12 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
 
     const organizeHierarchically = (items: AuditSampleItem[]) => {
         const hasCategoryMapping = !!appState.selectedPopulation?.column_mapping?.category;
-        
+
         // Debug: Ver qué tienen los items
         console.log('🔍 DEBUG - Primer item de la muestra:', items[0]);
         console.log('🔍 DEBUG - risk_factors del primer item:', items[0]?.risk_factors);
         console.log('🔍 DEBUG - Mapeo de categorías:', appState.selectedPopulation?.column_mapping);
-        
+
         const hierarchy: {
             [riskLevel: string]: {
                 [analysisType: string]: {
@@ -190,14 +190,14 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
             'Medio': {},
             'Bajo': {}
         };
-        
+
         items.forEach(item => {
             const riskScore = item.risk_score || 0;
             const riskFactors = item.risk_factors || [];
             const riskLevel = getRiskLevel(riskScore, riskFactors);
             const analysisType = getAnalysisType(riskFactors);
             const category = hasCategoryMapping ? (getCategoryFromItem(item) || 'Sin Categoría') : 'Todos';
-            
+
             // Debug: Ver clasificación del primer item
             if (items.indexOf(item) === 0) {
                 console.log('🔍 DEBUG - Clasificación del primer item:');
@@ -207,18 +207,18 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                 console.log('  - analysisType:', analysisType);
                 console.log('  - category:', category);
             }
-            
+
             if (!hierarchy[riskLevel][analysisType]) {
                 hierarchy[riskLevel][analysisType] = {};
             }
-            
+
             if (!hierarchy[riskLevel][analysisType][category]) {
                 hierarchy[riskLevel][analysisType][category] = [];
             }
-            
+
             hierarchy[riskLevel][analysisType][category].push(item);
         });
-        
+
         return { hierarchy, hasCategoryMapping };
     };
 
@@ -427,9 +427,18 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
             };
             console.log('🔵 [SAVE] Storage keys:', Object.keys(updatedStorage));
 
+            // 🔍 LOG PAYLOAD SIZE
+            const payloadSize = JSON.stringify(updatedStorage).length;
+            console.log('🔵 [SAVE] Payload size:', (payloadSize / 1024).toFixed(2), 'KB');
+
+            if (payloadSize > 500000) { // > 500KB
+                console.warn('⚠️ [SAVE] Large payload detected:', (payloadSize / 1024).toFixed(2), 'KB');
+            }
+
             console.log('🔵 [SAVE] Calling Supabase upsert...');
-            // Client-side save (optimized payload)
-            const { error } = await supabase
+
+            // ⏱️ ADD TIMEOUT WRAPPER (15 seconds)
+            const upsertPromise = supabase
                 .from('audit_results')
                 .upsert({
                     population_id: appState.selectedPopulation.id,
@@ -437,6 +446,12 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                     sample_size: updatedResults.sampleSize,
                     updated_at: new Date().toISOString()
                 }, { onConflict: 'population_id' });
+
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Timeout de 15s excedido - verifica el tamaño del payload')), 15000)
+            );
+
+            const { error } = await Promise.race([upsertPromise, timeoutPromise]) as any;
 
             console.log('🔵 [SAVE] Upsert completed');
             if (error) {
@@ -455,6 +470,7 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
             setIsSaving(false);
         }
     };
+
 
     const handleExpandSample = async () => {
         if (!appState.selectedPopulation) return;
@@ -661,7 +677,7 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                         return (
                             <div className="divide-y divide-slate-100">
                                 {Object.entries(hierarchy).map(([riskLevel, analysisTypes]) => {
-                                    const totalInLevel = Object.values(analysisTypes).reduce((sum, categories) => 
+                                    const totalInLevel = Object.values(analysisTypes).reduce((sum, categories) =>
                                         sum + Object.values(categories).reduce((s, items) => s + items.length, 0), 0
                                     );
                                     if (totalInLevel === 0) return null;
@@ -703,7 +719,7 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                                                     {Object.entries(analysisTypes).map(([analysisType, categories]) => {
                                                         const totalInType = Object.values(categories).reduce((sum, items) => sum + items.length, 0);
                                                         if (totalInType === 0) return null;
-                                                        
+
                                                         const typeKey = `${riskLevel}-${analysisType}`;
                                                         const isTypeExpanded = expandedAnalysisTypes.has(typeKey);
 
@@ -734,7 +750,7 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                                                                         <div className="pl-20 pr-6 pb-2 bg-slate-50">
                                                                             {Object.entries(categories).map(([category, items]) => {
                                                                                 if (items.length === 0) return null;
-                                                                                
+
                                                                                 const categoryKey = `${typeKey}-${category}`;
                                                                                 const isCategoryExpanded = expandedAnalysisTypes.has(categoryKey);
 

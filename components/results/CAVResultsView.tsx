@@ -104,6 +104,24 @@ const CAVResultsView: React.FC<Props> = ({ appState, setAppState, role, onBack }
                 throw new Error(`Proxy Save Failed (${saveRes.status}): ${errText}`);
             }
 
+            // 🔄 DUAL SAVE: Also update the current historical sample if it exists
+            try {
+                const historicalResponse = await fetch('/api/sampling_proxy?action=update_current_sample', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        population_id: appState.selectedPopulation.id,
+                        method: appState.samplingMethod,
+                        results_json: updatedStorage,
+                    }),
+                });
+                if (!historicalResponse.ok) {
+                    console.warn('⚠️ Failed to sync to historical sample (non-critical)');
+                }
+            } catch (historicalError) {
+                console.warn('⚠️ Historical sync error (non-critical):', historicalError);
+            }
+
             setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
 
             if (!silent) {

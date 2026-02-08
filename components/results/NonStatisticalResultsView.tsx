@@ -320,7 +320,7 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                                                 const updated = { ...currentResults, sample: ns };
                                                 setCurrentResults(updated);
                                                 setAppState(prev => ({ ...prev, results: updated }));
-                                                saveToDb(updated, true);
+                                                // Auto-save removed - only save when user clicks GUARDAR TRABAJO
                                             }}
                                             disabled={isApproved}
                                             className={`px-4 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${isEx ? 'bg-rose-600 text-white shadow-lg shadow-rose-200' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
@@ -340,7 +340,6 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                                                     setCurrentResults(updated);
                                                     setAppState(prev => ({ ...prev, results: updated }));
                                                 }}
-                                                onBlur={() => saveToDb(currentResults, true)}
                                                 className={`w-full bg-slate-50 border-none p-3 rounded-lg text-[10px] font-medium min-h-[50px] focus:ring-2 focus:ring-indigo-500/10 placeholder:text-slate-300 ${isEx ? 'bg-white shadow-inner' : ''}`}
                                                 placeholder="Observaciones de auditoría..."
                                             />
@@ -378,7 +377,6 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                                                             setCurrentResults(updated);
                                                             setAppState(prev => ({ ...prev, results: updated }));
                                                         }}
-                                                        onBlur={() => saveToDb(currentResults, true)}
                                                         className="w-28 bg-rose-50 border border-rose-100 rounded-lg px-2 py-1 text-[10px] font-bold text-rose-700 focus:ring-2 focus:ring-rose-200 shadow-inner"
                                                         placeholder="Monto"
                                                     />
@@ -396,6 +394,10 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
     };
 
     const saveToDb = async (updatedResults: AuditResults, silent = true) => {
+        // Create abort controller with 30s timeout as safety net
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+
         try {
             console.log('🔵 [SAVE] saveToDb called with silent:', silent);
 
@@ -417,6 +419,7 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
 
             if (!appState.selectedPopulation?.id) {
                 console.log('🔴 [SAVE] No population selected, exiting');
+                clearTimeout(timeoutId);
                 return;
             }
             console.log('🔵 [SAVE] Population ID:', appState.selectedPopulation.id);
@@ -467,8 +470,10 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
                     results_json: updatedStorage,
                     sample_size: updatedResults.sampleSize,
                 }),
+                signal: controller.signal // Add abort signal for timeout
             });
 
+            clearTimeout(timeoutId); // Clear timeout on successful response
             console.log('🔵 [SAVE] Proxy response status:', response.status);
 
             if (!response.ok) {
@@ -479,12 +484,51 @@ const NonStatisticalResultsView: React.FC<Props> = ({ appState, setAppState, rol
 
             const resultData = await response.json();
             console.log('✅ [SAVE] Save successful via proxy!', resultData);
+
+            // 🔄 DUAL SAVE: Also update the current historical sample if it exists
+            console.log('🔵 [SAVE] Attempting to sync to historical sample...');
+            try {
+                const historicalResponse = await fetch('/api/sampling_proxy?action=update_current_sample', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        population_id: appState.selectedPopulation.id,
+                        method: appState.samplingMethod,
+                        results_json: updatedStorage,
+                    }),
+                });
+
+                if (historicalResponse.ok) {
+                    const historicalData = await historicalResponse.json();
+                    if (historicalData.updated) {
+                        console.log('✅ [SAVE] Historical sample also updated');
+                    } else {
+                        console.log('ℹ️ [SAVE] No current historical sample to update (not locked yet)');
+                    }
+                } else {
+                    // Non-critical error - work-in-progress is saved, just historical sync failed
+                    console.warn('⚠️ [SAVE] Failed to sync to historical sample, but work-in-progress saved OK');
+                }
+            } catch (historicalError) {
+                // Non-critical - don't fail the whole save if historical update fails
+                console.warn('⚠️ [SAVE] Historical sync error (non-critical):', historicalError);
+            }
+
             setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
             if (!silent) setSaveFeedback({ show: true, title: "Sincronizado", message: "Papel de trabajo actualizado.", type: 'success' });
         } catch (err: any) {
-            console.error('🔴 [SAVE] Exception:', err);
-            console.error('🔴 [SAVE] Stack:', err?.stack);
-            if (!silent) setSaveFeedback({ show: true, title: "Error", message: err.message || "Falla de red.", type: 'error' });
+            clearTimeout(timeoutId);
+
+            if (err.name === 'AbortError') {
+                console.error('🔴 [SAVE] Request timed out after 30 seconds');
+                if (!silent) setSaveFeedback({ show: true, title: "Timeout", message: "La operación tardó demasiado. Intenta nuevamente.", type: 'error' });
+            } else {
+                console.error('🔴 [SAVE] Exception:', err);
+                console.error('🔴 [SAVE] Stack:', err?.stack);
+                if (!silent) setSaveFeedback({ show: true, title: "Error", message: err.message || "Falla de red.", type: 'error' });
+            }
         } finally {
             console.log('🔵 [SAVE] Cleanup (setIsSaving false)');
             setIsSaving(false);

@@ -43,31 +43,7 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
     else if (params.NC >= 95) rFactorDisplay = 3.0;
 
 
-    // Debounce para el guardado automático
-    const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
-    
-    const debouncedSave = (updatedResults: AuditResults) => {
-        // Cancelar el timeout anterior si existe
-        if (saveTimeout) {
-            clearTimeout(saveTimeout);
-        }
-        
-        // Crear nuevo timeout para guardar después de 2 segundos de inactividad
-        const newTimeout = setTimeout(() => {
-            saveToDb(updatedResults, true);
-        }, 2000);
-        
-        setSaveTimeout(newTimeout);
-    };
 
-    // Limpiar timeout al desmontar el componente
-    useEffect(() => {
-        return () => {
-            if (saveTimeout) {
-                clearTimeout(saveTimeout);
-            }
-        };
-    }, [saveTimeout]);
 
     // Auto-ocultar notificación de guardado
     useEffect(() => {
@@ -82,7 +58,7 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
     const saveToDb = async (updatedResults: AuditResults, silent = true) => {
         if (!appState.selectedPopulation?.id) return;
         setIsSaving(true);
-        
+
         try {
             // Snapshot del método actual
             const currentMethodResults = {
@@ -105,21 +81,33 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
                 sample_size: updatedResults.sampleSize
             }, { method: 'POST' });
 
+            // 🔄 DUAL SAVE: Also update the current historical sample if it exists
+            try {
+                await samplingProxyFetch('update_current_sample', {
+                    population_id: appState.selectedPopulation.id,
+                    method: appState.samplingMethod,
+                    results_json: updatedStorage
+                }, { method: 'POST' });
+            } catch (historicalError) {
+                // Non-critical - don't fail if historical sync fails
+                console.warn('⚠️ Historical sync error (non-critical):', historicalError);
+            }
+
             // Actualizamos el estado global con el nuevo storage para que App.tsx esté sincronizado
             setAppState(prev => ({ ...prev, full_results_storage: updatedStorage }));
 
             if (!silent) {
-                setSaveFeedback({ 
-                    show: true, 
-                    title: "Sincronizado", 
-                    message: "Papel de trabajo actualizado correctamente.", 
-                    type: 'success' 
+                setSaveFeedback({
+                    show: true,
+                    title: "Sincronizado",
+                    message: "Papel de trabajo actualizado correctamente.",
+                    type: 'success'
                 });
             }
 
         } catch (error: any) {
             console.error("Error saving to DB:", error);
-            
+
             let errorMessage = "Error al guardar";
             if (error instanceof FetchTimeoutError) {
                 errorMessage = "Timeout: El guardado tardó demasiado tiempo";
@@ -128,13 +116,13 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
             } else {
                 errorMessage += ": " + (error.message || "Error desconocido");
             }
-            
+
             if (!silent) {
-                setSaveFeedback({ 
-                    show: true, 
-                    title: "Error de Guardado", 
-                    message: errorMessage, 
-                    type: 'error' 
+                setSaveFeedback({
+                    show: true,
+                    title: "Error de Guardado",
+                    message: errorMessage,
+                    type: 'error'
                 });
             }
         } finally {
@@ -403,7 +391,6 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
                                                     const updated = { ...currentResults, sample: ns };
                                                     setCurrentResults(updated);
                                                     setAppState(prev => ({ ...prev, results: updated }));
-                                                    debouncedSave(updated);
                                                 }}
                                                 disabled={isApproved || isSaving}
                                                 className={`px-8 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all shadow-sm disabled:opacity-50 ${isEx ? 'bg-rose-600 text-white shadow-rose-200' : 'bg-emerald-500 text-white shadow-emerald-100'}`}
@@ -423,16 +410,6 @@ const AttributeResultsView: React.FC<Props> = ({ appState, setAppState, role, on
                                                     const updated = { ...currentResults, sample: ns };
                                                     setCurrentResults(updated);
                                                     setAppState(prev => ({ ...prev, results: updated }));
-                                                    // Usar debounced save para evitar guardar en cada keystroke
-                                                    debouncedSave(updated);
-                                                }}
-                                                onBlur={() => {
-                                                    // Guardar inmediatamente al perder el foco
-                                                    if (saveTimeout) {
-                                                        clearTimeout(saveTimeout);
-                                                        setSaveTimeout(null);
-                                                    }
-                                                    saveToDb(currentResults, true);
                                                 }}
                                                 className={`w-full text-[11px] font-bold rounded-xl px-4 py-2 border-2 transition-all ${isEx ? 'bg-white border-rose-200 text-rose-700' : 'bg-slate-50 border-transparent text-slate-300'}`}
                                                 placeholder={isEx ? "Documentar hallazgo..." : "Sin desviación"}

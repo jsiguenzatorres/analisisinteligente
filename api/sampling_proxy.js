@@ -172,12 +172,29 @@ export default async function handler(req, res) {
                 return res.status(200).json({ rows: data });
 
             } else if (action === 'get_history') {
+                console.log('📜 get_history called for population_id:', population_id);
                 const { data, error } = await supabase
                     .from('audit_historical_samples')
                     .select('*')
                     .eq('population_id', population_id)
                     .order('created_at', { ascending: false });
                 if (error) throw error;
+
+                // 🔍 DEBUG: Log what we're returning
+                if (data && data.length > 0) {
+                    console.log('📜 Found', data.length, 'historical samples');
+                    data.forEach((sample, idx) => {
+                        console.log(`  Sample ${idx + 1}:`, {
+                            id: sample.id,
+                            method: sample.method,
+                            is_current: sample.is_current,
+                            sample_size: sample.sample_size,
+                            has_results_snapshot: !!sample.results_snapshot,
+                            updated_at: sample.updated_at
+                        });
+                    });
+                }
+
                 return res.status(200).json({ history: data });
 
             } else if (action === 'get_observations') {
@@ -261,6 +278,51 @@ export default async function handler(req, res) {
                 } catch (upsertError) {
                     console.error('Upsert exception:', upsertError);
                     throw upsertError;
+                }
+
+
+            } else if (action === 'update_current_sample') {
+                console.log('🔄 update_current_sample called');
+                const { population_id, method, results_json } = req.body;
+                console.log('Population ID:', population_id);
+                console.log('Method:', method);
+                console.log('Results JSON type:', typeof results_json);
+
+                if (!population_id || !method || !results_json) {
+                    console.error('Missing fields - population_id:', !!population_id, 'method:', !!method, 'results_json:', !!results_json);
+                    return res.status(400).json({ error: 'Missing required fields' });
+                }
+
+                try {
+                    // ✅ CRITICAL: Filter by population_id + is_current=true + method
+                    // This ensures we ONLY update the active sample for THIS specific method
+                    const { data, error } = await supabase
+                        .from('audit_historical_samples')
+                        .update({
+                            results_snapshot: results_json,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('population_id', population_id)
+                        .eq('is_current', true)
+                        .eq('method', method)
+                        .select();
+
+                    if (error) {
+                        console.error('Supabase update error:', error);
+                        throw error;
+                    }
+
+                    if (!data || data.length === 0) {
+                        // No current sample found - this is OK, just means user hasn't locked yet
+                        console.log('ℹ️ No current sample found (user hasn\'t locked sample yet)');
+                        return res.status(200).json({ updated: false, reason: 'no_current_sample' });
+                    }
+
+                    console.log(`✅ Updated current sample for method ${method}`);
+                    return res.status(200).json({ updated: true, data });
+                } catch (updateError) {
+                    console.error('Update exception:', updateError);
+                    throw updateError;
                 }
 
 

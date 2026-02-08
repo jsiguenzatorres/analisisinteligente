@@ -514,14 +514,37 @@ const SamplingWorkspace: React.FC<Props> = ({ appState, setAppState, currentMeth
         }
     };
 
-    const onLoadHistory = (sample: HistoricalSample) => {
+    const onLoadHistory = async (sample: HistoricalSample) => {
+        console.log('📜 Loading historical sample:', sample.id, 'method:', sample.method);
+
+        // 🔄 CRITICAL FIX: Also check for newer work-in-progress
+        let latestResults = sample.results_snapshot;
+
+        try {
+            console.log('🔍 Checking audit_results for latest changes...');
+            const res = await fetch(`/api/get_audit_results?population_id=${appState.selectedPopulation?.id}`);
+
+            if (res.ok) {
+                const { data } = await res.json();
+                const wipStorage = data?.results_json;
+
+                if (wipStorage && wipStorage[sample.method]) {
+                    console.log('✅ Using latest work-in-progress for', sample.method);
+                    latestResults = wipStorage[sample.method];
+                } else {
+                    console.log('ℹ️ No work-in-progress, using historical snapshot');
+                }
+            }
+        } catch (error) {
+            console.warn('⚠️ Could not load work-in-progress, using snapshot:', error);
+        }
         setAppState(prev => ({
             ...prev,
             samplingMethod: sample.method,
             generalParams: { ...prev.generalParams, objective: sample.objective, seed: sample.seed },
             samplingParams: sample.params_snapshot,
-            results: sample.results_snapshot,
-            observations: sample.results_snapshot.observations || [],
+            results: latestResults,
+            observations: latestResults.observations || [],
             isLocked: true,
             isCurrentVersion: sample.is_current,
             historyId: sample.id

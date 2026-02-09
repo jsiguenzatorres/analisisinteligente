@@ -213,7 +213,61 @@ export default async function handler(req, res) {
 
         // --- POST Actions ---
         else if (req.method === 'POST') {
-            if (action === 'save_sample') {
+            if (action === 'create_population') {
+                console.log('🚀 create_population called via backend');
+                const { population, data_rows, user_id } = req.body;
+
+                if (!population || !data_rows || !user_id) {
+                    return res.status(400).json({ error: 'Missing required fields: population, data_rows, user_id' });
+                }
+
+                console.log(`Creating population: ${population.audit_name}, rows: ${data_rows.length}`);
+
+                // Insert population
+                const { data: popData, error: popError } = await supabase
+                    .from('audit_populations')
+                    .insert([{ ...population, user_id }])
+                    .select()
+                    .single();
+
+                if (popError) {
+                    console.error('❌ Error creating population:', popError);
+                    throw popError;
+                }
+
+                const populationId = popData.id;
+                console.log(`✅ Population created: ${populationId}`);
+
+                // Insert data rows in batches of 1000
+                const BATCH_SIZE = 1000;
+                let inserted = 0;
+
+                for (let i = 0; i < data_rows.length; i += BATCH_SIZE) {
+                    const batch = data_rows.slice(i, i + BATCH_SIZE).map(row => ({
+                        ...row,
+                        population_id: populationId
+                    }));
+
+                    const { error: rowsError } = await supabase
+                        .from('audit_data_rows')
+                        .insert(batch);
+
+                    if (rowsError) {
+                        console.error(`❌ Error inserting batch ${i / BATCH_SIZE + 1}:`, rowsError);
+                        throw rowsError;
+                    }
+
+                    inserted += batch.length;
+                    console.log(`✅ Inserted ${inserted}/${data_rows.length} rows`);
+                }
+
+                return res.status(200).json({
+                    success: true,
+                    population_id: populationId,
+                    inserted_rows: inserted
+                });
+
+            } else if (action === 'save_sample') {
                 const { population_id, method, sample_data, is_final } = req.body;
                 if (!population_id || !method || !sample_data) return res.status(400).json({ error: 'Missing required fields' });
 

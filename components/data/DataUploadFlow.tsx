@@ -137,8 +137,8 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
 
             addLog("📊 Estadísticas calculadas.");
 
-            // 1. Crear registro de Población DIRECTAMENTE con Supabase (sin Vercel proxy)
-            addLog("🚀 Creando población en Supabase...");
+            // 1. Preparar datos para enviar al backend
+            addLog("🚀 Creando población vía backend proxy...");
 
             const popPayload = {
                 file_name: populationName || file.name,
@@ -149,95 +149,46 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                 total_rows: data.length,
                 total_monetary_value: totalMonetaryValue,
                 descriptive_stats: descriptiveStats,
-                column_mapping: mapping,
-                user_id: user.id
+                column_mapping: mapping
             };
 
-            const { data: popData, error: popError } = await supabase
-                .from('audit_populations')
-                .insert([popPayload])
-                .select()
-                .single();
+            const dataRows = data.map(row => ({
+                unique_id_col: String(row[mapping.uniqueId]),
+                monetary_value_col: hasMonetaryCols && mapping.monetaryValue ? parseMoney(row[mapping.monetaryValue]) : 0,
+                category_col: mapping.category ? String(row[mapping.category]) : null,
+                subcategory_col: mapping.subcategory ? String(row[mapping.subcategory]) : null,
+                raw_json: row
+            }));
 
-            if (popError) {
-                throw new Error(`Error al crear población: ${popError.message}`);
+            addLog(`📦 Enviando ${dataRows.length} filas al backend...`);
+
+            // 2. Llamar al backend proxy que usa service_role
+            const response = await fetch('/api/sampling_proxy?action=create_population', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    population: popPayload,
+                    data_rows: dataRows,
+                    user_id: user.id
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Error del servidor: ${response.status} - ${errorText}`);
             }
 
-            const populationId = popData.id;
+            const result = await response.json();
+            const populationId = result.population_id;
+
             addLog(`✅ Población creada (ID: ${populationId})`);
-            addLog(`⏩ Iniciando carga de ${data.length} filas DIRECTO a Supabase...`);
+            addLog(`✅ ${result.inserted_rows} filas insertadas`);
 
-            // 2. Preparar y subir datos por lotes DIRECTAMENTE a Supabase (sin proxy)
-            // Aumentamos tamaño de lote a 100 ya que no hay límite de Vercel
-            const BATCH_SIZE = 100;
-            const batches = [];
+            // 3. Completar con progreso del 100%
+            setUploadProgress(100);
+            addLog("✅ Carga Completada vía Backend Proxy.");
 
-            for (let i = 0; i < data.length; i += BATCH_SIZE) {
-                const chunk = data.slice(i, i + BATCH_SIZE).map(row => ({
-                    population_id: populationId,
-                    unique_id_col: String(row[mapping.uniqueId]),
-                    monetary_value_col: hasMonetaryCols && mapping.monetaryValue ? parseMoney(row[mapping.monetaryValue]) : 0,
-                    category_col: mapping.category ? String(row[mapping.category]) : null,
-                    subcategory_col: mapping.subcategory ? String(row[mapping.subcategory]) : null,
-                    raw_json: row
-                }));
-                batches.push(chunk);
-            }
-
-            addLog(`📦 Subiendo ${batches.length} lotes a Supabase (Batch Size: ${BATCH_SIZE})...`);
-
-            // Enviamos lotes SECUENCIALMENTE con retry
-            let completedBatches = 0;
-
-            for (const [idx, batch] of batches.entries()) {
-                addLog(`⏳ Lote ${idx + 1}/${batches.length} (${batch.length} filas)...`);
-
-                let batchSuccess = false;
-                let batchRetries = 0;
-                const MAX_BATCH_RETRIES = 3;
-
-                while (!batchSuccess && batchRetries < MAX_BATCH_RETRIES) {
-                    try {
-                        const { error: batchError } = await supabase
-                            .from('audit_data_rows')
-                            .insert(batch);
-
-                        if (batchError) {
-                            throw batchError;
-                        }
-
-                        batchSuccess = true;
-
-                    } catch (batchErr: any) {
-                        batchRetries++;
-                        console.warn(`Batch ${idx + 1} failed (Attempt ${batchRetries}/${MAX_BATCH_RETRIES})`, batchErr);
-
-                        if (batchRetries >= MAX_BATCH_RETRIES) {
-                            throw new Error(`Fallo en lote ${idx + 1} tras ${MAX_BATCH_RETRIES} intentos: ${batchErr.message}`);
-                        }
-
-                        const waitTime = 1000 * batchRetries;
-                        addLog(`⚠️ Reintentando lote ${idx + 1} en ${waitTime / 1000}s...`);
-                        await new Promise(resolve => setTimeout(resolve, waitTime));
-                    }
-                }
-
-                completedBatches++;
-                const progress = Math.round(((idx + 1) / batches.length) * 100);
-                setUploadProgress(progress);
-
-                // Pequeña pausa para no saturar (opcional, Supabase maneja bien el rate limiting)
-                await new Promise(resolve => setTimeout(resolve, 200));
-            }
-
-            // Validación final de conteo
-            if (completedBatches !== batches.length) {
-                throw new Error("No se completaron todos los lotes.");
-            }
-
-            addLog("✅ Carga Completada (Supabase Directo - Sin Timeouts).");
-
-            // 3. Finalizar Inmediatamente
+            //4. Finalizar
             onComplete(populationId);
 
         } catch (err: any) {
@@ -476,28 +427,28 @@ const DataUploadFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                                                 <div
                                                     key={i}
                                                     className={`group flex items-start gap-3 p-3 rounded-xl transition-all duration-300 hover:scale-[1.02] ${isError ? 'bg-red-500/10 border border-red-500/20' :
-                                                            isSuccess ? 'bg-emerald-500/10 border border-emerald-500/20' :
-                                                                isWarning ? 'bg-yellow-500/10 border border-yellow-500/20' :
-                                                                    isInfo ? 'bg-blue-500/10 border border-blue-500/20' :
-                                                                        'bg-slate-800/50 border border-slate-700/50'
+                                                        isSuccess ? 'bg-emerald-500/10 border border-emerald-500/20' :
+                                                            isWarning ? 'bg-yellow-500/10 border border-yellow-500/20' :
+                                                                isInfo ? 'bg-blue-500/10 border border-blue-500/20' :
+                                                                    'bg-slate-800/50 border border-slate-700/50'
                                                         }`}
                                                 >
                                                     {/* Número de línea */}
                                                     <span className={`flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black ${isError ? 'bg-red-500/20 text-red-400' :
-                                                            isSuccess ? 'bg-emerald-500/20 text-emerald-400' :
-                                                                isWarning ? 'bg-yellow-500/20 text-yellow-400' :
-                                                                    isInfo ? 'bg-blue-500/20 text-blue-400' :
-                                                                        'bg-slate-700 text-slate-400'
+                                                        isSuccess ? 'bg-emerald-500/20 text-emerald-400' :
+                                                            isWarning ? 'bg-yellow-500/20 text-yellow-400' :
+                                                                isInfo ? 'bg-blue-500/20 text-blue-400' :
+                                                                    'bg-slate-700 text-slate-400'
                                                         }`}>
                                                         {String(i + 1).padStart(2, '0')}
                                                     </span>
 
                                                     {/* Contenido del log */}
                                                     <span className={`flex-1 text-sm font-mono leading-relaxed ${isError ? 'text-red-300' :
-                                                            isSuccess ? 'text-emerald-300' :
-                                                                isWarning ? 'text-yellow-300' :
-                                                                    isInfo ? 'text-blue-300' :
-                                                                        'text-slate-300'
+                                                        isSuccess ? 'text-emerald-300' :
+                                                            isWarning ? 'text-yellow-300' :
+                                                                isInfo ? 'text-blue-300' :
+                                                                    'text-slate-300'
                                                         }`}>
                                                         {log}
                                                     </span>

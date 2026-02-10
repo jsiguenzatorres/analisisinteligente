@@ -22,6 +22,8 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
     const params = appState.samplingParams.nonStatistical;
     const analysis = appState.selectedPopulation?.advanced_analysis;
 
+
+
     const [detailModalOpen, setDetailModalOpen] = useState(false);
     const [detailType, setDetailType] = useState<string | null>(null);
     const [detailItems, setDetailItems] = useState<any[]>([]);
@@ -114,30 +116,33 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
 
     const getBenfordAnomalyCount = () => {
         if (!analysis?.benford) return 0;
-        return analysis.benford
-            .filter(b => b.isSuspicious)
-            .reduce((acc, curr) => acc + curr.actualCount, 0);
+        // Count DIGITS that are suspicious, not total records
+        return analysis.benford.filter(b => b.isSuspicious).length;
     };
 
-    // Funciones helper para los nuevos análisis
+    // Funciones helper para los nuevos análisis - AHORA SUMAN ALTO + MEDIO RIESGO
     const getEntropyAnomalies = () => {
         return analysis?.entropy?.anomalousCount || 0;
     };
 
     const getSplittingGroups = () => {
-        return analysis?.splitting?.highRiskGroups || 0;
+        // Sumar suspiciousVendors (total) en lugar de highRiskGroups
+        return analysis?.splitting?.suspiciousVendors || 0;
     };
 
     const getSequentialGaps = () => {
-        return analysis?.sequential?.highRiskGaps || 0;
+        // Sumar totalGaps en lugar de highRiskGaps
+        return analysis?.sequential?.totalGaps || 0;
     };
 
     const getIsolationForestAnomalies = () => {
-        return analysis?.isolationForest?.highRiskAnomalies || 0;
+        // Sumar totalAnomalies en lugar de highRiskAnomalies
+        return analysis?.isolationForest?.totalAnomalies || 0;
     };
 
     const getSuspiciousActors = () => {
-        return analysis?.actorProfiling?.highRiskActors || 0;
+        // Sumar totalSuspiciousActors en lugar de highRiskActors
+        return analysis?.actorProfiling?.totalSuspiciousActors || 0;
     };
 
     const getEnhancedBenfordDeviation = () => {
@@ -361,8 +366,10 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     });
 
                     rows = (entropyRows || []).filter(r => {
-                        const factors = r.risk_factors || [];
-                        return factors.some((f: string) => f.toLowerCase().includes('entropy') || f.toLowerCase().includes('categoria'));
+                        const factors = Array.isArray(r.risk_factors) ? r.risk_factors : [];
+                        return factors.some((f: string) =>
+                            f && (f.toLowerCase().includes('entropy') || f.toLowerCase().includes('categoria'))
+                        );
                     }).slice(0, 100);
                     break;
 
@@ -374,8 +381,15 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     });
 
                     rows = (splittingRows || []).filter(r => {
-                        const factors = r.risk_factors || [];
-                        return factors.some((f: string) => f.toLowerCase().includes('splitting') || f.toLowerCase().includes('fraccionamiento'));
+                        const factors = Array.isArray(r.risk_factors) ? r.risk_factors : [];
+                        return factors.some((f: string) =>
+                            f && (
+                                f.toLowerCase().includes('splitting') ||
+                                f.toLowerCase().includes('fraccionamiento') ||
+                                f.toLowerCase().includes('grupo_riesgo') ||
+                                f.toLowerCase().includes('proveedor_sospechoso')
+                            )
+                        );
                     }).slice(0, 100);
                     break;
 
@@ -387,8 +401,14 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     });
 
                     rows = (sequentialRows || []).filter(r => {
-                        const factors = r.risk_factors || [];
-                        return factors.some((f: string) => f.toLowerCase().includes('gap') || f.toLowerCase().includes('secuencial'));
+                        const factors = Array.isArray(r.risk_factors) ? r.risk_factors : [];
+                        return factors.some((f: string) =>
+                            f && (
+                                f.toLowerCase().includes('gap') ||
+                                f.toLowerCase().includes('secuencial') ||
+                                f.toLowerCase().includes('falta_consecutivo')
+                            )
+                        );
                     }).slice(0, 100);
                     break;
 
@@ -400,8 +420,15 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     });
 
                     rows = (isolationRows || []).filter(r => {
-                        const factors = r.risk_factors || [];
-                        return factors.some((f: string) => f.toLowerCase().includes('isolation') || f.toLowerCase().includes('ml_anomaly'));
+                        const factors = Array.isArray(r.risk_factors) ? r.risk_factors : [];
+                        return factors.some((f: string) =>
+                            f && (
+                                f.toLowerCase().includes('isolation') ||
+                                f.toLowerCase().includes('ml_anomaly') ||
+                                f.toLowerCase().includes('anomalia_ml') ||
+                                f.toLowerCase().includes('patron_inusual')
+                            )
+                        );
                     }).slice(0, 100);
                     break;
 
@@ -413,8 +440,14 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     });
 
                     rows = (actorRows || []).filter(r => {
-                        const factors = r.risk_factors || [];
-                        return factors.some((f: string) => f.toLowerCase().includes('actor') || f.toLowerCase().includes('usuario_sospechoso'));
+                        const factors = Array.isArray(r.risk_factors) ? r.risk_factors : [];
+                        return factors.some((f: string) =>
+                            f && (
+                                f.toLowerCase().includes('actor') ||
+                                f.toLowerCase().includes('usuario_sospechoso') ||
+                                f.toLowerCase().includes('comportamiento_inusual')
+                            )
+                        );
                     }).slice(0, 100);
                     break;
 
@@ -426,8 +459,17 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                     });
 
                     rows = (enhancedBenfordRows || []).filter(r => {
-                        const factors = r.risk_factors || [];
-                        return factors.some((f: string) => f.toLowerCase().includes('enhanced_benford') || f.toLowerCase().includes('segundo_digito'));
+                        const factors = Array.isArray(r.risk_factors) ? r.risk_factors : [];
+                        // Ampliar búsqueda a cualquier factor relacionado con Benford mejorado
+                        return factors.some((f: string) =>
+                            f && (
+                                f.toLowerCase().includes('enhanced_benford') ||
+                                f.toLowerCase().includes('segundo_digito') ||
+                                f.toLowerCase().includes('benford_avanzado') ||
+                                f.toLowerCase().includes('patron_suspechoso') ||
+                                f.toLowerCase().includes('conformidad')
+                            )
+                        );
                     }).slice(0, 100);
                     break;
 
@@ -610,7 +652,8 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
         };
 
         items.forEach(item => {
-            const riskFactors = item.raw?.risk_factors || [];
+            const rawFactors = item.raw?.risk_factors;
+            const riskFactors = Array.isArray(rawFactors) ? rawFactors : [];
             const riskLevel = getRiskLevel(riskFactors);
             const analysisType = getAnalysisType(riskFactors);
 
@@ -663,6 +706,9 @@ const NonStatisticalSampling: React.FC<Props> = ({ appState, setAppState }) => {
                         <h4 className="text-teal-900 font-black text-[11px] uppercase tracking-wider">Análisis Forense y Selección de Criterios</h4>
                         <p className="text-[11px] text-teal-700 font-medium">
                             Seleccione una tarjeta para cargar criterios automáticamente, o use los botones para ver explicaciones técnicas y detalles de hallazgos.
+                        </p>
+                        <p className="text-[10px] text-teal-600 font-bold mt-1 italic border-t border-teal-200/50 pt-1 inline-block">
+                            <i className="fas fa-info-circle mr-1"></i> Nota: Las métricas presentadas incluyen hallazgos de riesgo ALTO y MEDIO del análisis forense.
                         </p>
                     </div>
                 </div>

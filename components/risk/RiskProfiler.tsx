@@ -765,6 +765,38 @@ const RiskProfiler: React.FC<Props> = ({ population, onComplete }) => {
 
         cache.setCache(population.id, population, cacheData);
 
+        // 🔥 CRÍTICO: Actualizar appState.selectedPopulation.advanced_analysis INMEDIATAMENTE
+        // para que NonStatisticalSampling vea los mismos datos sin esperar a guardar recomendación
+        const updatedPopWithAnalysis = {
+            ...population,
+            advanced_analysis: advancedAnalysis
+        };
+
+        // Actualizar el appState para sincronizar con NonStatisticalSampling
+        // onComplete(updatedPopWithAnalysis); // Removed to prevent auto-navigation
+
+
+        // Guardar advanced_analysis en la base de datos INMEDIATAMENTE
+        console.log("💾 Guardando advanced_analysis en DB...");
+        try {
+            const saveAnalysisRes = await fetch('/api/update_mapping', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: population.id,
+                    advanced_analysis: advancedAnalysis
+                })
+            });
+
+            if (!saveAnalysisRes.ok) {
+                console.warn("⚠️ Error guardando advanced_analysis:", await saveAnalysisRes.text());
+            } else {
+                console.log("✅ advanced_analysis guardado en DB correctamente");
+            }
+        } catch (error) {
+            console.error("❌ Error al guardar advanced_analysis:", error);
+        }
+
         // Guardar offline si es móvil
         if (isMobile) {
             offlineSync.saveOffline(
